@@ -640,6 +640,18 @@ object IQMcpClient {
       .map(IQMcpDecoder.decodeWriteFileResult)
   }
 
+  def callSaveFile(
+      path: Option[String] = None,
+      timeoutMs: Long
+  ): Either[String, Unit] = {
+    val args: Map[String, Any] = path match {
+      case Some(p) => Map("path" -> p)
+      case None    => Map.empty
+    }
+    callTool("save_file", args, normalizedToolTimeout(timeoutMs))
+      .map(_ => ())
+  }
+
   /** Open a file in jEdit, optionally creating it.
     * @param path absolute path to the file
     * @param createIfMissing if true, create file if it doesn't exist

@@ -65,6 +65,7 @@ object BedrockClient {
   }
 
   private[assistant] def requireAnthropicModel(modelId: String): Unit = {
+    if (OpenAIAdapter.isOpenAIModel(modelId)) return
     validateAnthropicModel(modelId) match {
       case Right(_) => ()
       case Left(ModelValidationError.MissingModel) =>
@@ -719,9 +720,18 @@ object BedrockClient {
     initialMessages: List[ChatTurn],
     maxTokens: Int
   ): String = {
+    val invoker: InvokeModelRequest => String =
+      if (OpenAIAdapter.isOpenAIModel(modelId)) {
+        val apiKey = Option(System.getenv("OPENAI_API_KEY")).getOrElse(
+          throw new RuntimeException("OPENAI_API_KEY environment variable not set"))
+        val baseUrl = Option(System.getenv("OPENAI_BASE_URL")).getOrElse("https://api.openai.com/v1")
+        OpenAIAdapter.makeInvoker(apiKey, baseUrl)
+      } else {
+        request => getClient.invokeModel(request).body().asUtf8String()
+      }
     invokeChatWithToolsTestable(
       modelId, systemPrompt, initialMessages, maxTokens,
-      request => getClient.invokeModel(request).body().asUtf8String(),
+      invoker,
       (toolName, args) => {
         val view = Option(currentViewTL.get())
           .orElse(Option(org.gjt.sp.jedit.jEdit.getActiveView))

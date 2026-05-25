@@ -319,9 +319,6 @@ object ToolPermissions {
   }
 
   def getConfiguredLevel(toolId: ToolId): PermissionLevel = {
-    // ask_user is always Allow and cannot be changed (would create recursion)
-    if (toolId == ToolId.AskUser) return Allow
-
     val key = s"assistant.permissions.tool.${toolId.wireName}"
     val value = jEdit.getProperty(key, "")
     PermissionLevel
@@ -335,7 +332,7 @@ object ToolPermissions {
   }
 
   def setConfiguredLevel(toolId: ToolId, level: PermissionLevel): Unit = {
-    if (toolId == ToolId.AskUser) return // ask_user is locked to Allow
+    if (toolId == ToolId.AskUser) return // ask_user locked: prevent recursion in promptUser
     val key = s"assistant.permissions.tool.${toolId.wireName}"
     jEdit.setProperty(key, level.toConfigString)
   }

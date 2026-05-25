@@ -1610,6 +1610,10 @@ object AssistantTools {
                           // this theory — their command IDs / sources may now
                           // be stale. See VerificationCache.invalidateNode.
                           val _ = VerificationCache.invalidateNode(path)
+                          val _ = IQMcpClient.callSaveFile(
+                            path = Some(path),
+                            timeoutMs = ToolHelpers.readToolsTimeoutMs
+                          )
                           val contextStart = math.max(1, startLine - 3)
                           val contextEnd = math.max(contextStart, startLine + 5)
                           val context = IQMcpClient

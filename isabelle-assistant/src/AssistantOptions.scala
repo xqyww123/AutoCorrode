@@ -565,9 +565,9 @@ object AssistantOptions {
 
   /** Validate a main-model ID; clears and warns on invalid input. */
   private def validateMainModel(raw: String, n: Normalizer): String =
-    if (raw.isEmpty || BedrockModels.isAnthropicModelId(raw)) raw
+    if (raw.isEmpty || BedrockModels.isAnthropicModelId(raw) || OpenAIAdapter.isOpenAIModel(raw)) raw
     else {
-      n.warn("Model ID was invalid and has been cleared. Only Anthropic model IDs are supported.")
+      n.warn("Model ID was invalid and has been cleared. Only Anthropic or OpenAI model IDs are supported.")
       ""
     }
 
@@ -808,6 +808,7 @@ object AssistantOptions {
   def getModelId: String = {
     val base = getBaseModelId
     if (base.isEmpty) ""
+    else if (OpenAIAdapter.isOpenAIModel(base)) base
     else if (getUseCris) BedrockModels.applyCrisPrefix(base, getRegion)
     else base
   }
