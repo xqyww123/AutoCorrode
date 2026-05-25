@@ -1610,9 +1610,11 @@ object AssistantTools {
                           // this theory — their command IDs / sources may now
                           // be stale. See VerificationCache.invalidateNode.
                           val _ = VerificationCache.invalidateNode(path)
-                          val _ = IQMcpClient.callSaveFile(
+                          IQMcpClient.callSaveFile(
                             path = Some(path),
                             timeoutMs = ToolHelpers.readToolsTimeoutMs
+                          ).left.foreach(err =>
+                            Output.writeln(s"[edit_theory] save_file warning: $err")
                           )
                           val contextStart = math.max(1, startLine - 3)
                           val contextEnd = math.max(contextStart, startLine + 5)
