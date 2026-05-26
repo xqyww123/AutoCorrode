@@ -126,9 +126,11 @@ class AssistantPlugin extends EBPlugin {
 
   private def usageJson(status: String, contentJson: String, elapsedMs: Long): String = {
     val uncached = OpenAIAdapter.totalPromptTokens - OpenAIAdapter.totalCachedTokens
+    val modelId = try { AssistantOptions.getModelId } catch { case _: Exception => "unknown" }
     s"""{
       |"status":${OpenAIAdapter.jsonStr(status)},
       |"${if (status == "error") "error" else "response"}":$contentJson,
+      |"model":${OpenAIAdapter.jsonStr(modelId)},
       |"elapsed_ms":$elapsedMs,
       |"prompt_tokens":${OpenAIAdapter.totalPromptTokens},
       |"cached_tokens":${OpenAIAdapter.totalCachedTokens},
