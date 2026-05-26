@@ -20,18 +20,22 @@ object OpenAIAdapter {
   private val _totalCompletionTokens = new java.util.concurrent.atomic.AtomicLong(0)
   private val _totalCachedTokens = new java.util.concurrent.atomic.AtomicLong(0)
   private val _totalRequests = new java.util.concurrent.atomic.AtomicLong(0)
+  private val _totalToolCalls = new java.util.concurrent.atomic.AtomicLong(0)
 
   def resetUsage(): Unit = {
     _totalPromptTokens.set(0)
     _totalCompletionTokens.set(0)
     _totalCachedTokens.set(0)
     _totalRequests.set(0)
+    _totalToolCalls.set(0)
   }
 
   def totalPromptTokens: Long = _totalPromptTokens.get()
   def totalCompletionTokens: Long = _totalCompletionTokens.get()
   def totalCachedTokens: Long = _totalCachedTokens.get()
   def totalRequests: Long = _totalRequests.get()
+  def totalToolCalls: Long = _totalToolCalls.get()
+  def addToolCalls(n: Int): Unit = { val _ = _totalToolCalls.addAndGet(n.toLong) }
 
   def usageSummary: String =
     s"OpenAI usage: ${totalRequests} requests, ${totalPromptTokens} prompt tokens (${totalCachedTokens} cached), ${totalCompletionTokens} completion tokens"

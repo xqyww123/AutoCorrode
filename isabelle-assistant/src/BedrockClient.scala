@@ -836,6 +836,7 @@ object BedrockClient {
         // Collect text from this response
         val currentTextParts = blocks.collect { case ResponseParser.TextBlock(t) => t }
         val toolUses = blocks.collect { case t: ResponseParser.ToolUseBlock => t }
+        if (toolUses.nonEmpty) OpenAIAdapter.addToolCalls(toolUses.length)
 
         // Append (not replace) text parts from this iteration
         if (currentTextParts.nonEmpty) textParts ++= currentTextParts

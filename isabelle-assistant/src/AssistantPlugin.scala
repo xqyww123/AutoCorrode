@@ -134,7 +134,8 @@ class AssistantPlugin extends EBPlugin {
       |"cached_tokens":${OpenAIAdapter.totalCachedTokens},
       |"uncached_prompt_tokens":$uncached,
       |"completion_tokens":${OpenAIAdapter.totalCompletionTokens},
-      |"api_requests":${OpenAIAdapter.totalRequests}
+      |"api_requests":${OpenAIAdapter.totalRequests},
+      |"tool_calls":${OpenAIAdapter.totalToolCalls}
       |}""".stripMargin
   }
 
