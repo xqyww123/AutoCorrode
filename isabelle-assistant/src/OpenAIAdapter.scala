@@ -16,8 +16,6 @@ import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelRequest
 
 object OpenAIAdapter {
 
-  case class Usage(promptTokens: Long, completionTokens: Long, totalTokens: Long)
-
   private val _totalPromptTokens = new java.util.concurrent.atomic.AtomicLong(0)
   private val _totalCompletionTokens = new java.util.concurrent.atomic.AtomicLong(0)
   private val _totalCachedTokens = new java.util.concurrent.atomic.AtomicLong(0)
@@ -93,7 +91,7 @@ object OpenAIAdapter {
         Output.writeln(s"[Assistant] Responses API call succeeded (response_id=${lastResponseId.getOrElse("none")})")
         responsesToAnthropic(response)
       } catch {
-        case ex: RuntimeException if lastResponseId.isDefined =>
+        case ex: Exception if lastResponseId.isDefined =>
           Output.writeln(s"[Assistant] Incremental Responses API call failed, falling back to full context: ${ex.getMessage}")
           lastResponseId = None
           val payload = anthropicToResponses(anthropicPayload, modelId)
@@ -136,6 +134,9 @@ object OpenAIAdapter {
     val systemText = JSON.string(root, "system").getOrElse("")
     val messages = JSON.list(root, "messages", (x: JSON.T) => Some(x)).getOrElse(Nil)
     val tools = JSON.list(root, "tools", (x: JSON.T) => Some(x)).getOrElse(Nil)
+
+    if (messages.isEmpty)
+      return anthropicToResponses(anthropicJson, model)
 
     val lastMsg = messages.last
     val inputItems = convertMessageToInputItems(lastMsg)
