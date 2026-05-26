@@ -1,6 +1,8 @@
-/* OpenAI Chat Completions adapter for BedrockClient.
+/* OpenAI Responses API adapter for BedrockClient.
    Converts between Anthropic and OpenAI JSON formats so the existing
-   agentic loop (invokeChatWithToolsTestable) works unchanged. */
+   agentic loop (invokeChatWithToolsTestable) works unchanged.
+   Uses previous_response_id for multi-turn context chaining,
+   preserving reasoning items server-side across turns. */
 
 package isabelle.assistant
 
@@ -45,18 +47,18 @@ object OpenAIAdapter {
       JSON.value(obj, key).collect { case d: Double => d.toLong.toInt }
     ).getOrElse(0)
 
-  private def recordUsage(openaiJson: String): Unit = {
-    val root = JSON.parse(openaiJson)
+  private def recordUsage(responseJson: String): Unit = {
+    val root = JSON.parse(responseJson)
     val usage = JSON.value(root, "usage").getOrElse(Map.empty[String, Any])
       .asInstanceOf[Map[String, Any]]
-    val prompt = intFromJson(usage, "prompt_tokens")
-    val completion = intFromJson(usage, "completion_tokens")
-    val cached = JSON.value(usage, "prompt_tokens_details")
+    val input = intFromJson(usage, "input_tokens")
+    val output = intFromJson(usage, "output_tokens")
+    val cached = JSON.value(usage, "input_tokens_details")
       .collect { case m: Map[String @unchecked, _] => m.asInstanceOf[Map[String, Any]] }
       .map(d => intFromJson(d, "cached_tokens"))
       .getOrElse(0)
-    val _ = _totalPromptTokens.addAndGet(prompt.toLong)
-    val _ = _totalCompletionTokens.addAndGet(completion.toLong)
+    val _ = _totalPromptTokens.addAndGet(input.toLong)
+    val _ = _totalCompletionTokens.addAndGet(output.toLong)
     val _ = _totalCachedTokens.addAndGet(cached.toLong)
     val _ = _totalRequests.incrementAndGet()
   }
@@ -67,56 +69,101 @@ object OpenAIAdapter {
   def extractOpenAIModel(modelId: String): String =
     if (modelId.startsWith("openai/")) modelId.stripPrefix("openai/") else modelId
 
+  // The closure is stateful: it tracks the last response ID for
+  // previous_response_id chaining. BedrockClient's agentic loop calls the
+  // invoker sequentially (single-threaded), so no synchronization is needed.
   def makeInvoker(apiKey: String, baseUrl: String = "https://api.openai.com/v1"): InvokeModelRequest => String = {
+    var lastResponseId: Option[String] = None
+
     request => {
       val anthropicPayload = request.body().asUtf8String()
       val modelId = extractOpenAIModel(request.modelId())
-      val openaiPayload = anthropicToOpenAI(anthropicPayload, modelId)
-      val openaiResponse = callOpenAI(openaiPayload, apiKey, baseUrl)
-      recordUsage(openaiResponse)
-      openaiToAnthropic(openaiResponse)
+
+      try {
+        val (mode, payload) = lastResponseId match {
+          case Some(prevId) =>
+            ("incremental", anthropicToResponsesIncremental(anthropicPayload, modelId, prevId))
+          case None =>
+            ("full", anthropicToResponses(anthropicPayload, modelId))
+        }
+        Output.writeln(s"[Assistant] Responses API call ($mode), payload size=${payload.length}")
+        val response = callResponses(payload, apiKey, baseUrl)
+        recordUsage(response)
+        lastResponseId = extractResponseId(response)
+        Output.writeln(s"[Assistant] Responses API call succeeded (response_id=${lastResponseId.getOrElse("none")})")
+        responsesToAnthropic(response)
+      } catch {
+        case ex: RuntimeException if lastResponseId.isDefined =>
+          Output.writeln(s"[Assistant] Incremental Responses API call failed, falling back to full context: ${ex.getMessage}")
+          lastResponseId = None
+          val payload = anthropicToResponses(anthropicPayload, modelId)
+          Output.writeln("[Assistant] Responses API fallback call (full)")
+          val response = callResponses(payload, apiKey, baseUrl)
+          recordUsage(response)
+          lastResponseId = extractResponseId(response)
+          Output.writeln(s"[Assistant] Fallback succeeded (response_id=${lastResponseId.getOrElse("none")})")
+          responsesToAnthropic(response)
+      }
     }
   }
 
-  private def anthropicToOpenAI(anthropicJson: String, model: String): String = {
+  private def extractResponseId(responseJson: String): Option[String] = {
+    val root = JSON.parse(responseJson)
+    JSON.string(root, "id")
+  }
+
+  // Convert full Anthropic payload to Responses API format (first call)
+  private def anthropicToResponses(anthropicJson: String, model: String): String = {
     val root = JSON.parse(anthropicJson)
     val maxTokens = JSON.int(root, "max_tokens").getOrElse(4096)
     val systemText = JSON.string(root, "system").getOrElse("")
     val messages = JSON.list(root, "messages", (x: JSON.T) => Some(x)).getOrElse(Nil)
     val tools = JSON.list(root, "tools", (x: JSON.T) => Some(x)).getOrElse(Nil)
 
-    val sb = new StringBuilder
-    sb.append(s"""{"model":${jsonStr(model)},"max_completion_tokens":$maxTokens,"messages":[""")
-
-    var first = true
-
-    if (systemText.nonEmpty) {
-      sb.append(s"""{"role":"system","content":${jsonStr(systemText)}}""")
-      first = false
-    }
-
+    val inputItems = scala.collection.mutable.ListBuffer[String]()
     for (msg <- messages) {
-      if (!first) sb.append(",")
-      first = false
-      val role = JSON.string(msg, "role").getOrElse("user")
-      val content = JSON.value(msg, "content")
-
-      content match {
-        case Some(list: List[_]) =>
-          val blocks = list.collect { case m: Map[String @unchecked, _] => m }
-          if (role == "user") {
-            val converted = convertUserBlocks(blocks)
-            sb.append(converted.mkString(","))
-          } else if (role == "assistant") {
-            sb.append(convertAssistantBlocks(blocks))
-          }
-        case Some(s: String) =>
-          sb.append(s"""{"role":${jsonStr(role)},"content":${jsonStr(s)}}""")
-        case _ =>
-          sb.append(s"""{"role":${jsonStr(role)},"content":""}""")
-      }
+      inputItems ++= convertMessageToInputItems(msg)
     }
 
+    buildResponsesRequest(model, maxTokens, systemText, inputItems.toList, tools, None)
+  }
+
+  // Convert only the last message for incremental calls with previous_response_id
+  private def anthropicToResponsesIncremental(
+      anthropicJson: String, model: String, previousResponseId: String): String = {
+    val root = JSON.parse(anthropicJson)
+    val maxTokens = JSON.int(root, "max_tokens").getOrElse(4096)
+    val systemText = JSON.string(root, "system").getOrElse("")
+    val messages = JSON.list(root, "messages", (x: JSON.T) => Some(x)).getOrElse(Nil)
+    val tools = JSON.list(root, "tools", (x: JSON.T) => Some(x)).getOrElse(Nil)
+
+    val lastMsg = messages.last
+    val inputItems = convertMessageToInputItems(lastMsg)
+
+    buildResponsesRequest(model, maxTokens, systemText, inputItems, tools, Some(previousResponseId))
+  }
+
+  private def buildResponsesRequest(
+      model: String, maxTokens: Int, instructions: String,
+      inputItems: List[String], tools: List[JSON.T],
+      previousResponseId: Option[String]): String = {
+    val sb = new StringBuilder
+    sb.append(s"""{"model":${jsonStr(model)},"max_output_tokens":$maxTokens""")
+
+    if (instructions.nonEmpty) {
+      sb.append(s""","instructions":${jsonStr(instructions)}""")
+    }
+
+    sb.append(""","reasoning":{"effort":"high"}""")
+    sb.append(""","store":true""")
+    sb.append(",\"truncation\":\"auto\"")
+
+    previousResponseId.foreach { id =>
+      sb.append(s""","previous_response_id":${jsonStr(id)}""")
+    }
+
+    sb.append(""","input":[""")
+    sb.append(inputItems.mkString(","))
     sb.append("]")
 
     if (tools.nonEmpty) {
@@ -128,16 +175,34 @@ object OpenAIAdapter {
         val name = JSON.string(tool, "name").getOrElse("")
         val desc = JSON.string(tool, "description").getOrElse("")
         val schema = JSON.value(tool, "input_schema").getOrElse(Map.empty)
-        sb.append(s"""{"type":"function","function":{"name":${jsonStr(name)},"description":${jsonStr(desc)},"parameters":${jsonAny(schema)}}}""")
+        sb.append(s"""{"type":"function","name":${jsonStr(name)},"description":${jsonStr(desc)},"parameters":${jsonAny(schema)},"strict":false}""")
       }
       sb.append("]")
     }
 
-    sb.append(",\"reasoning\":{\"effort\":\"high\"}")
     sb.append("}")
     sb.toString
   }
 
+  // Convert an Anthropic message to Responses API input items
+  private def convertMessageToInputItems(msg: JSON.T): List[String] = {
+    val role = JSON.string(msg, "role").getOrElse("user")
+    val content = JSON.value(msg, "content")
+
+    content match {
+      case Some(list: List[_]) =>
+        val blocks = list.collect { case m: Map[String @unchecked, _] => m }
+        if (role == "user") convertUserBlocks(blocks)
+        else if (role == "assistant") convertAssistantBlocks(blocks)
+        else Nil
+      case Some(s: String) =>
+        List(s"""{"role":${jsonStr(role)},"content":${jsonStr(s)}}""")
+      case _ =>
+        List(s"""{"role":${jsonStr(role)},"content":""}""")
+    }
+  }
+
+  // Convert user content blocks to Responses API input items
   private def convertUserBlocks(blocks: List[Map[String, Any]]): List[String] = {
     val results = scala.collection.mutable.ListBuffer[String]()
     val textParts = scala.collection.mutable.ListBuffer[String]()
@@ -149,9 +214,9 @@ object OpenAIAdapter {
           results += s"""{"role":"user","content":${jsonStr(textParts.mkString("\n"))}}"""
           textParts.clear()
         }
-        val toolUseId = JSON.string(block, "tool_use_id").getOrElse("")
-        val content = JSON.string(block, "content").getOrElse("")
-        results += s"""{"role":"tool","tool_call_id":${jsonStr(toolUseId)},"content":${jsonStr(content)}}"""
+        val callId = JSON.string(block, "tool_use_id").getOrElse("")
+        val output = JSON.string(block, "content").getOrElse("")
+        results += s"""{"type":"function_call_output","call_id":${jsonStr(callId)},"output":${jsonStr(output)}}"""
       } else if (blockType == "text") {
         textParts += JSON.string(block, "text").getOrElse("")
       }
@@ -164,47 +229,32 @@ object OpenAIAdapter {
     results.toList
   }
 
-  private def convertAssistantBlocks(blocks: List[Map[String, Any]]): String = {
+  // Convert assistant content blocks to separate Responses API input items
+  private def convertAssistantBlocks(blocks: List[Map[String, Any]]): List[String] = {
+    val results = scala.collection.mutable.ListBuffer[String]()
     val textParts = scala.collection.mutable.ListBuffer[String]()
-    val toolCalls = scala.collection.mutable.ListBuffer[Map[String, Any]]()
 
     for (block <- blocks) {
       val blockType = JSON.string(block, "type").getOrElse("")
       if (blockType == "text") {
         textParts += JSON.string(block, "text").getOrElse("")
       } else if (blockType == "tool_use") {
-        toolCalls += block
+        val id = JSON.string(block, "id").getOrElse("")
+        val name = JSON.string(block, "name").getOrElse("")
+        val input = JSON.value(block, "input").getOrElse(Map.empty)
+        results += s"""{"type":"function_call","call_id":${jsonStr(id)},"name":${jsonStr(name)},"arguments":${jsonStr(jsonAny(input))}}"""
       }
     }
 
-    val sb = new StringBuilder
-    sb.append("""{"role":"assistant",""")
     if (textParts.nonEmpty) {
-      sb.append(s""""content":${jsonStr(textParts.mkString("\n"))}""")
-    } else {
-      sb.append(""""content":null""")
+      results.prepend(s"""{"role":"assistant","content":${jsonStr(textParts.mkString("\n"))}}""")
     }
 
-    if (toolCalls.nonEmpty) {
-      sb.append(",\"tool_calls\":[")
-      var first = true
-      for (tc <- toolCalls) {
-        if (!first) sb.append(",")
-        first = false
-        val id = JSON.string(tc, "id").getOrElse("")
-        val name = JSON.string(tc, "name").getOrElse("")
-        val input = JSON.value(tc, "input").getOrElse(Map.empty)
-        sb.append(s"""{"id":${jsonStr(id)},"type":"function","function":{"name":${jsonStr(name)},"arguments":${jsonStr(jsonAny(input))}}}""")
-      }
-      sb.append("]")
-    }
-
-    sb.append("}")
-    sb.toString
+    results.toList
   }
 
-  private def callOpenAI(payload: String, apiKey: String, baseUrl: String): String = {
-    val url = URI.create(s"$baseUrl/chat/completions").toURL
+  private def callResponses(payload: String, apiKey: String, baseUrl: String): String = {
+    val url = URI.create(s"$baseUrl/responses").toURL
     val conn = url.openConnection().asInstanceOf[HttpURLConnection]
     conn.setRequestMethod("POST")
     conn.setRequestProperty("Content-Type", "application/json")
@@ -233,54 +283,69 @@ object OpenAIAdapter {
       if (status >= 200 && status < 300) {
         sb.toString
       } else {
-        throw new RuntimeException(s"OpenAI API error ($status): ${sb.toString.take(500)}")
+        val errBody = sb.toString.take(500)
+        Output.writeln(s"[Assistant] OpenAI API error (HTTP $status): $errBody")
+        throw new RuntimeException(s"OpenAI API error ($status): $errBody")
       }
     } finally {
       reader.close()
     }
   }
 
-  private def openaiToAnthropic(openaiJson: String): String = {
-    val root = JSON.parse(openaiJson)
-    val choices = JSON.list(root, "choices", (x: JSON.T) => Some(x)).getOrElse(Nil)
-    val choice = choices.headOption.getOrElse(Map.empty[String, Any])
-    val message = JSON.value(choice, "message").getOrElse(Map.empty[String, Any])
-      .asInstanceOf[Map[String, Any]]
-    val finishReason = JSON.string(choice, "finish_reason").getOrElse("stop")
+  // Convert Responses API response to Anthropic format for ResponseParser
+  private def responsesToAnthropic(responseJson: String): String = {
+    val root = JSON.parse(responseJson)
+    val status = JSON.string(root, "status").getOrElse("completed")
+    val outputItems = JSON.list(root, "output", (x: JSON.T) => Some(x)).getOrElse(Nil)
 
-    val stopReason = finishReason match {
-      case "tool_calls" => "tool_use"
-      case "length"     => "max_tokens"
-      case _            => "end_turn"
+    if (status == "failed") {
+      val error = JSON.value(root, "error")
+        .collect { case m: Map[String @unchecked, _] => m.asInstanceOf[Map[String, Any]] }
+      val errorMsg = error.flatMap(e => JSON.string(e, "message")).getOrElse("unknown error")
+      Output.writeln(s"[Assistant] Responses API returned failed status: $errorMsg")
+      return """{"stop_reason":"end_turn","content":[]}"""
     }
 
-    val sb = new StringBuilder
-    sb.append(s"""{"stop_reason":${jsonStr(stopReason)},"content":[""")
+    var hasToolCalls = false
+    val contentParts = scala.collection.mutable.ListBuffer[String]()
 
-    var first = true
-
-    val textContent = JSON.string(message, "content")
-    textContent.foreach { text =>
-      if (text.nonEmpty) {
-        sb.append(s"""{"type":"text","text":${jsonStr(text)}}""")
-        first = false
+    for (item <- outputItems) {
+      val itemType = JSON.string(item, "type").getOrElse("")
+      itemType match {
+        case "message" =>
+          val msgContent = JSON.list(item, "content", (x: JSON.T) => Some(x)).getOrElse(Nil)
+          for (part <- msgContent) {
+            val partType = JSON.string(part, "type").getOrElse("")
+            if (partType == "output_text") {
+              val text = JSON.string(part, "text").getOrElse("")
+              if (text.nonEmpty) {
+                contentParts += s"""{"type":"text","text":${jsonStr(text)}}"""
+              }
+            }
+          }
+        case "function_call" =>
+          hasToolCalls = true
+          val callId = JSON.string(item, "call_id").getOrElse("")
+          val name = JSON.string(item, "name").getOrElse("")
+          val argsStr = JSON.string(item, "arguments").getOrElse("{}")
+          contentParts += s"""{"type":"tool_use","id":${jsonStr(callId)},"name":${jsonStr(name)},"input":$argsStr}"""
+        case "reasoning" =>
+          // Skip — preserved server-side via previous_response_id
+        case _ =>
       }
     }
 
-    val toolCalls = JSON.list(message, "tool_calls", (x: JSON.T) => Some(x)).getOrElse(Nil)
-    for (tc <- toolCalls) {
-      if (!first) sb.append(",")
-      first = false
-      val id = JSON.string(tc, "id").getOrElse("")
-      val fn = JSON.value(tc, "function").getOrElse(Map.empty[String, Any])
-        .asInstanceOf[Map[String, Any]]
-      val name = JSON.string(fn, "name").getOrElse("")
-      val argsStr = JSON.string(fn, "arguments").getOrElse("{}")
-      sb.append(s"""{"type":"tool_use","id":${jsonStr(id)},"name":${jsonStr(name)},"input":$argsStr}""")
-    }
+    val stopReason = if (hasToolCalls) "tool_use"
+      else if (status == "incomplete") {
+        val details = JSON.value(root, "incomplete_details")
+          .collect { case m: Map[String @unchecked, _] => m.asInstanceOf[Map[String, Any]] }
+        val reason = details.flatMap(d => JSON.string(d, "reason")).getOrElse("unknown")
+        Output.writeln(s"[Assistant] Responses API returned incomplete: $reason")
+        "max_tokens"
+      }
+      else "end_turn"
 
-    sb.append("]}")
-    sb.toString
+    s"""{"stop_reason":${jsonStr(stopReason)},"content":[${contentParts.mkString(",")}]}"""
   }
 
   private[assistant] def jsonStr(s: String): String = {
