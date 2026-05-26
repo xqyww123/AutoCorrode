@@ -133,6 +133,7 @@ object OpenAIAdapter {
       sb.append("]")
     }
 
+    sb.append(",\"reasoning\":{\"effort\":\"high\"}")
     sb.append("}")
     sb.toString
   }
