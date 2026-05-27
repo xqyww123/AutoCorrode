@@ -611,7 +611,7 @@ object AssistantOptions {
     ),
     n.normalizeOptionalInt(
       f.maxToolIterationsField.getText, "Max Tool Iterations",
-      AssistantConstants.DEFAULT_MAX_TOOL_ITERATIONS, 1, 50
+      AssistantConstants.DEFAULT_MAX_TOOL_ITERATIONS, 1, 10000
     )
   )
 

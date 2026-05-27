@@ -13,10 +13,10 @@ import java.util.Locale
 private[assistant] object ToolArgs {
 
   /** Maximum length for string arguments from LLM tool calls. */
-  val MAX_STRING_ARG_LENGTH = 10000
+  val MAX_STRING_ARG_LENGTH = 100000
 
   /** Maximum length for proof text arguments. */
-  val MAX_PROOF_ARG_LENGTH = 5000
+  val MAX_PROOF_ARG_LENGTH = 50000
 
   /** Maximum length for search pattern arguments. */
   val MAX_PATTERN_ARG_LENGTH = 500

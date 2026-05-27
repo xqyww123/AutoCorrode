@@ -1084,8 +1084,7 @@ object BedrockClient {
     // Get auto-discovered system prompts
     val systemPrompt = PromptLoader.getSystemPrompt
 
-    // Validate prompt length (conservative limit: 200k chars ≈ 50k tokens for most models)
-    val maxPromptChars = 200000
+    val maxPromptChars = 20000000
     val totalLength = systemPrompt.length + prompt.length
     if (totalLength > maxPromptChars) {
       throw new IllegalArgumentException(
