@@ -52,7 +52,7 @@ object AssistantConstants {
   val MAX_MESSAGE_SIZE_CHARS = 5_000_000
 
   // Model parameters
-  val DEFAULT_MAX_TOKENS = 16384
+  val DEFAULT_MAX_TOKENS = 128000
   /** Default context budget in tokens. Leaves ~140K-340K headroom depending
     * on the active Claude model (Opus 4.6 / 4.7 support up to 1M, Sonnet
     * 4.6 up to 200K) for tool outputs and the response itself. Raise via
