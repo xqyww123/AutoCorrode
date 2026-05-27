@@ -95,8 +95,8 @@ object AssistantConstants {
   // File and content limits
   val MAX_CONTENT_PREVIEW_LENGTH = 200
   val MAX_ERROR_MESSAGE_LENGTH = 500
-  val MAX_RESPONSE_LENGTH = 10000
-  val MAX_CHAT_CONTEXT_CHARS = 210000  // ~60K tokens at 3.5 chars/token
+  val MAX_RESPONSE_LENGTH = 100000
+  val MAX_CHAT_CONTEXT_CHARS = 21000000
 
   // Network constants
   val DEFAULT_MCP_PORT = 8765
@@ -113,7 +113,7 @@ object AssistantConstants {
     * to the 500-entry cap. 64K chars (~16K tokens) covers any reasonable
     * typed or copy-pasted prompt without letting a 1MB paste live on
     * indefinitely. */
-  val MAX_HISTORY_ENTRY_CHARS = 64 * 1024
+  val MAX_HISTORY_ENTRY_CHARS = 64 * 1024 * 1024
   
   // Operation timeouts and buffers
   val TIMEOUT_BUFFER_MS = 2000L
