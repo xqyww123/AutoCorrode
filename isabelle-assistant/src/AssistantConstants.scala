@@ -31,7 +31,7 @@ object AssistantConstants {
   val DEFAULT_MAX_VERIFY_CANDIDATES = 5
   val DEFAULT_FIND_THEOREMS_LIMIT = 20
   val DEFAULT_TRACE_DEPTH = 3
-  val MAX_ACCUMULATED_MESSAGES = 1000
+  val MAX_ACCUMULATED_MESSAGES = 100000
   val VERIFICATION_CACHE_SIZE = 100
 
   /** Verification-cache entry TTL. After this many milliseconds an entry is
@@ -49,16 +49,16 @@ object AssistantConstants {
     * beyond any reasonable conversational message but generous enough
     * for occasional large tool outputs before truncation kicks in.
     */
-  val MAX_MESSAGE_SIZE_CHARS = 500_000
+  val MAX_MESSAGE_SIZE_CHARS = 5_000_000
 
   // Model parameters
-  val DEFAULT_MAX_TOKENS = 4000
+  val DEFAULT_MAX_TOKENS = 16384
   /** Default context budget in tokens. Leaves ~140K-340K headroom depending
     * on the active Claude model (Opus 4.6 / 4.7 support up to 1M, Sonnet
     * 4.6 up to 200K) for tool outputs and the response itself. Raise via
     * Plugin Options if a session is hitting the soft truncation cap. */
-  val DEFAULT_MAX_CONTEXT_TOKENS = 60000
-  val DEFAULT_MAX_TOOL_ITERATIONS = 10
+  val DEFAULT_MAX_CONTEXT_TOKENS = 1000000
+  val DEFAULT_MAX_TOOL_ITERATIONS = 1000
   /** Size of the sliding window of recent tool-call signatures kept for stuck-loop detection. */
   val LOOP_DETECTION_WINDOW = 6
   /** Minimum number of identical consecutive tool calls that trigger stuck-loop detection. */

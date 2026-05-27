@@ -1630,6 +1630,7 @@ Produce a structured plan with:
 
         val currentTextParts = blocks.collect { case ResponseParser.TextBlock(t) => t }
         val toolUses = blocks.collect { case t: ResponseParser.ToolUseBlock => t }
+        if (toolUses.nonEmpty) OpenAIAdapter.addToolCalls(toolUses.length)
 
         if (currentTextParts.nonEmpty) textParts ++= currentTextParts
 
