@@ -110,6 +110,26 @@ object OpenAIAdapter {
     JSON.string(root, "id")
   }
 
+  // Convert Anthropic tool_choice to OpenAI Responses API format.
+  // Anthropic: {"type":"tool","name":"X"} / {"type":"any"} / {"type":"auto"} / {"type":"none"}
+  // OpenAI:    {"type":"function","name":"X"} / "required" / "auto" / "none"
+  private def convertToolChoice(root: JSON.T): Option[String] = {
+    JSON.value(root, "tool_choice") match {
+      case Some(tc: Map[String @unchecked, _]) =>
+        val tcMap = tc.asInstanceOf[Map[String, Any]]
+        JSON.string(tcMap, "type") match {
+          case Some("tool") =>
+            val name = JSON.string(tcMap, "name").getOrElse("")
+            Some(s"""{"type":"function","name":${jsonStr(name)}}""")
+          case Some("any") => Some("\"required\"")
+          case Some("auto") => Some("\"auto\"")
+          case Some("none") => Some("\"none\"")
+          case _ => None
+        }
+      case _ => None
+    }
+  }
+
   // Convert full Anthropic payload to Responses API format (first call)
   private def anthropicToResponses(anthropicJson: String, model: String): String = {
     val root = JSON.parse(anthropicJson)
@@ -117,13 +137,14 @@ object OpenAIAdapter {
     val systemText = JSON.string(root, "system").getOrElse("")
     val messages = JSON.list(root, "messages", (x: JSON.T) => Some(x)).getOrElse(Nil)
     val tools = JSON.list(root, "tools", (x: JSON.T) => Some(x)).getOrElse(Nil)
+    val toolChoice = convertToolChoice(root)
 
     val inputItems = scala.collection.mutable.ListBuffer[String]()
     for (msg <- messages) {
       inputItems ++= convertMessageToInputItems(msg)
     }
 
-    buildResponsesRequest(model, maxTokens, systemText, inputItems.toList, tools, None)
+    buildResponsesRequest(model, maxTokens, systemText, inputItems.toList, tools, None, toolChoice)
   }
 
   // Convert only the last message for incremental calls with previous_response_id
@@ -134,6 +155,7 @@ object OpenAIAdapter {
     val systemText = JSON.string(root, "system").getOrElse("")
     val messages = JSON.list(root, "messages", (x: JSON.T) => Some(x)).getOrElse(Nil)
     val tools = JSON.list(root, "tools", (x: JSON.T) => Some(x)).getOrElse(Nil)
+    val toolChoice = convertToolChoice(root)
 
     if (messages.isEmpty)
       return anthropicToResponses(anthropicJson, model)
@@ -141,13 +163,14 @@ object OpenAIAdapter {
     val lastMsg = messages.last
     val inputItems = convertMessageToInputItems(lastMsg)
 
-    buildResponsesRequest(model, maxTokens, systemText, inputItems, tools, Some(previousResponseId))
+    buildResponsesRequest(model, maxTokens, systemText, inputItems, tools, Some(previousResponseId), toolChoice)
   }
 
   private def buildResponsesRequest(
       model: String, maxTokens: Int, instructions: String,
       inputItems: List[String], tools: List[JSON.T],
-      previousResponseId: Option[String]): String = {
+      previousResponseId: Option[String],
+      toolChoice: Option[String] = None): String = {
     val sb = new StringBuilder
     sb.append(s"""{"model":${jsonStr(model)},"max_output_tokens":$maxTokens""")
 
@@ -179,6 +202,10 @@ object OpenAIAdapter {
         sb.append(s"""{"type":"function","name":${jsonStr(name)},"description":${jsonStr(desc)},"parameters":${jsonAny(schema)},"strict":false}""")
       }
       sb.append("]")
+    }
+
+    toolChoice.foreach { tc =>
+      sb.append(s""","tool_choice":$tc""")
     }
 
     sb.append("}")

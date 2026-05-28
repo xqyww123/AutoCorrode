@@ -45,9 +45,9 @@ object AssistantConstants {
   /** Per-message hard cap. A single runaway response (or a very large
     * pasted file) can otherwise exceed any context budget on its own,
     * even after the count-based `MAX_ACCUMULATED_MESSAGES` cap trims the
-    * history. 500_000 chars is roughly 100_000-125_000 tokens — well
-    * beyond any reasonable conversational message but generous enough
-    * for occasional large tool outputs before truncation kicks in.
+    * history. 500K chars is roughly 100K-125K tokens — well beyond any
+    * reasonable conversational message but generous enough for occasional
+    * large tool outputs before truncation kicks in.
     */
   val MAX_MESSAGE_SIZE_CHARS = 5_000_000
 
@@ -96,7 +96,7 @@ object AssistantConstants {
   val MAX_CONTENT_PREVIEW_LENGTH = 200
   val MAX_ERROR_MESSAGE_LENGTH = 500
   val MAX_RESPONSE_LENGTH = 100000
-  val MAX_CHAT_CONTEXT_CHARS = 21000000
+  val MAX_CHAT_CONTEXT_CHARS = 1000000
 
   // Network constants
   val DEFAULT_MCP_PORT = 8765
