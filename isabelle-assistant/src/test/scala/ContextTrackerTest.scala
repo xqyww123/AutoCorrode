@@ -58,6 +58,9 @@ class ContextTrackerTest extends AnyFunSuite with Matchers {
     ContextTracker.modelContextWindow(
       "anthropic.claude-3-5-made-up-id"
     ) shouldBe 200000
+    // Direct Claude API model IDs.
+    ContextTracker.modelContextWindow("claude-sonnet-4-6") shouldBe 200000
+    ContextTracker.modelContextWindow("claude-opus-4-1-20250805") shouldBe 200000
     // Totally unknown model falls back to the conservative default.
     ContextTracker.modelContextWindow("some-other-vendor.foo") shouldBe 200000
     ContextTracker.modelContextWindow("") shouldBe 200000

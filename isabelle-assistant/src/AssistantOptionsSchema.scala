@@ -43,7 +43,7 @@ object AssistantOptionsSchema {
 
   def isValidBaseModelId(modelId: String): Boolean =
     modelId.matches(modelIdPattern) &&
-      (modelId.isEmpty || BedrockModels.isAnthropicModelId(modelId) || OpenAIAdapter.isOpenAIModel(modelId))
+      (modelId.isEmpty || BedrockModels.isAnthropicModelId(modelId) || OpenAIAdapter.isOpenAIModel(modelId) || ClaudeAdapter.isClaudeDirectModel(modelId))
 
   def isValidRegion(region: String): Boolean =
     region.matches(regionPattern)

@@ -565,9 +565,9 @@ object AssistantOptions {
 
   /** Validate a main-model ID; clears and warns on invalid input. */
   private def validateMainModel(raw: String, n: Normalizer): String =
-    if (raw.isEmpty || BedrockModels.isAnthropicModelId(raw) || OpenAIAdapter.isOpenAIModel(raw)) raw
+    if (raw.isEmpty || BedrockModels.isAnthropicModelId(raw) || OpenAIAdapter.isOpenAIModel(raw) || ClaudeAdapter.isClaudeDirectModel(raw)) raw
     else {
-      n.warn("Model ID was invalid and has been cleared. Only Anthropic or OpenAI model IDs are supported.")
+      n.warn("Model ID was invalid and has been cleared. Supported formats: Bedrock (anthropic.claude-*), direct API (claude-*), or OpenAI (gpt-*/openai/*).")
       ""
     }
 
@@ -581,7 +581,7 @@ object AssistantOptions {
       raw: String, name: String, n: Normalizer
   ): String =
     if (raw == USE_MAIN_MODEL_LABEL || raw.isEmpty) ""
-    else if (BedrockModels.isAnthropicModelId(raw) || OpenAIAdapter.isOpenAIModel(raw)) raw
+    else if (BedrockModels.isAnthropicModelId(raw) || OpenAIAdapter.isOpenAIModel(raw) || ClaudeAdapter.isClaudeDirectModel(raw)) raw
     else {
       n.warn(
         s"$name Model ID '$raw' is not a valid model and has been cleared. " +
@@ -808,7 +808,7 @@ object AssistantOptions {
   def getModelId: String = {
     val base = getBaseModelId
     if (base.isEmpty) ""
-    else if (OpenAIAdapter.isOpenAIModel(base)) base
+    else if (OpenAIAdapter.isOpenAIModel(base) || ClaudeAdapter.isClaudeDirectModel(base)) base
     else if (getUseCris) BedrockModels.applyCrisPrefix(base, getRegion)
     else base
   }
@@ -816,7 +816,7 @@ object AssistantOptions {
   def getPlanningModelId: String = {
     val base = getPlanningBaseModelId
     if (base.isEmpty) getModelId
-    else if (OpenAIAdapter.isOpenAIModel(base)) base
+    else if (OpenAIAdapter.isOpenAIModel(base) || ClaudeAdapter.isClaudeDirectModel(base)) base
     else if (getUseCris) BedrockModels.applyCrisPrefix(base, getRegion)
     else base
   }
@@ -828,7 +828,7 @@ object AssistantOptions {
   def getSummarizationModelId: String = {
     val base = getSummarizationBaseModelId
     if (base.isEmpty) getModelId
-    else if (OpenAIAdapter.isOpenAIModel(base)) base
+    else if (OpenAIAdapter.isOpenAIModel(base) || ClaudeAdapter.isClaudeDirectModel(base)) base
     else if (getUseCris) BedrockModels.applyCrisPrefix(base, getRegion)
     else base
   }
@@ -976,7 +976,7 @@ object AssistantOptions {
       "model",
       "assistant.model.id",
       isValidBaseModelId,
-      "Invalid model ID. Only Anthropic model IDs are supported (for example: anthropic.claude-3-7-sonnet-20250219-v1:0).",
+      "Invalid model ID. Supported formats: Bedrock (anthropic.claude-*), direct API (claude-*), or OpenAI (gpt-*/openai/*).",
       _.baseModelId
     ),
     BoolSetting("cris", "assistant.use.cris", _.useCris),
@@ -1079,7 +1079,7 @@ object AssistantOptions {
       "planning_model",
       "assistant.planning.model.id",
       isValidBaseModelId,
-      "Invalid planning model ID. Only Anthropic model IDs are supported (or empty to use main model).",
+      "Invalid planning model ID. Supported formats: Bedrock (anthropic.claude-*), direct API (claude-*), or OpenAI (gpt-*/openai/*). Leave empty to use main model.",
       s => if (s.planningBaseModelId.isEmpty) "(use main)" else s.planningBaseModelId
     ),
     BoolSetting("auto_summarize", "assistant.auto.summarize", _.autoSummarize),
@@ -1094,7 +1094,7 @@ object AssistantOptions {
       "summarization_model",
       "assistant.summarization.model.id",
       isValidBaseModelId,
-      "Invalid summarization model ID. Only Anthropic model IDs are supported (or empty to use main model).",
+      "Invalid summarization model ID. Supported formats: Bedrock (anthropic.claude-*), direct API (claude-*), or OpenAI (gpt-*/openai/*). Leave empty to use main model.",
       s => if (s.summarizationBaseModelId.isEmpty) "(use main)" else s.summarizationBaseModelId
     )
   )

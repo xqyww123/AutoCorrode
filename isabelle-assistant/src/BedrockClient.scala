@@ -49,7 +49,7 @@ object BedrockClient {
       case InvalidFormat(modelId) =>
         s"Invalid model ID format: $modelId"
       case UnsupportedProvider(modelId) =>
-        s"Unsupported model '$modelId'. Only Anthropic models are supported because tool-use requires the Anthropic API."
+        s"Unsupported model '$modelId'. Supported formats: Bedrock (anthropic.claude-*), direct API (claude-*), or OpenAI (gpt-*/openai/*)."
     }
   }
 
@@ -66,6 +66,7 @@ object BedrockClient {
 
   private[assistant] def requireAnthropicModel(modelId: String): Unit = {
     if (OpenAIAdapter.isOpenAIModel(modelId)) return
+    if (ClaudeAdapter.isClaudeDirectModel(modelId)) return
     validateAnthropicModel(modelId) match {
       case Right(_) => ()
       case Left(ModelValidationError.MissingModel) =>
@@ -96,7 +97,7 @@ object BedrockClient {
         val remaining = (circuitOpenUntilMs - now) / 1000
         throw new RuntimeException(
           s"Service temporarily unavailable (${remaining}s cooldown after $consecutiveFailures consecutive failures). " +
-          "Check your network connection and AWS credentials.")
+          "Check your network connection and API credentials.")
       } else {
         // Cooldown elapsed — allow a probe request. Reduce failure count to
         // threshold-1 so that another failure will re-open the circuit, but
@@ -184,6 +185,24 @@ object BedrockClient {
             client
         }
       }
+    }
+  }
+
+  /** Create the appropriate invoker for a model ID.
+    * For loop methods, call once and reuse; for one-shot methods, call per invocation. */
+  private def makeInvoker(modelId: String): InvokeModelRequest => String = {
+    if (OpenAIAdapter.isOpenAIModel(modelId)) {
+      val apiKey = Option(System.getenv("OPENAI_API_KEY")).getOrElse(
+        throw new RuntimeException("OPENAI_API_KEY environment variable not set"))
+      val baseUrl = Option(System.getenv("OPENAI_BASE_URL")).getOrElse("https://api.openai.com/v1")
+      OpenAIAdapter.makeInvoker(apiKey, baseUrl)
+    } else if (ClaudeAdapter.isClaudeDirectModel(modelId)) {
+      val apiKey = Option(System.getenv("ANTHROPIC_API_KEY")).getOrElse(
+        throw new RuntimeException("ANTHROPIC_API_KEY environment variable not set"))
+      val baseUrl = Option(System.getenv("ANTHROPIC_BASE_URL")).getOrElse("https://api.anthropic.com")
+      ClaudeAdapter.makeInvoker(apiKey, baseUrl)
+    } else {
+      request => getClient.invokeModel(request).body().asUtf8String()
     }
   }
 
@@ -496,8 +515,7 @@ object BedrockClient {
       .build()
 
     enforceRateLimit()
-    val response = getClient.invokeModel(request)
-    val responseJson = response.body().asUtf8String()
+    val responseJson = makeInvoker(modelId)(request)
 
     ResponseParser.extractForcedToolArgs(responseJson).getOrElse(
       throw new RuntimeException("The model did not return a structured response. Try rephrasing your request or use a different model.")
@@ -536,8 +554,7 @@ object BedrockClient {
       .build()
 
     enforceRateLimit()
-    val response = getClient.invokeModel(request)
-    val responseJson = response.body().asUtf8String()
+    val responseJson = makeInvoker(modelId)(request)
 
     ResponseParser.extractForcedToolArgs(responseJson).getOrElse(
       throw new RuntimeException("The model did not return a structured response. Try rephrasing your request or use a different model.")
@@ -720,15 +737,7 @@ object BedrockClient {
     initialMessages: List[ChatTurn],
     maxTokens: Int
   ): String = {
-    val invoker: InvokeModelRequest => String =
-      if (OpenAIAdapter.isOpenAIModel(modelId)) {
-        val apiKey = Option(System.getenv("OPENAI_API_KEY")).getOrElse(
-          throw new RuntimeException("OPENAI_API_KEY environment variable not set"))
-        val baseUrl = Option(System.getenv("OPENAI_BASE_URL")).getOrElse("https://api.openai.com/v1")
-        OpenAIAdapter.makeInvoker(apiKey, baseUrl)
-      } else {
-        request => getClient.invokeModel(request).body().asUtf8String()
-      }
+    val invoker: InvokeModelRequest => String = makeInvoker(modelId)
     invokeChatWithToolsTestable(
       modelId, systemPrompt, initialMessages, maxTokens,
       invoker,
@@ -1106,8 +1115,7 @@ object BedrockClient {
       .build()
 
     enforceRateLimit()
-    val response = getClient.invokeModel(request)
-    val responseBody = response.body().asUtf8String()
+    val responseBody = makeInvoker(modelId)(request)
 
     val parsed = ResponseParser.parseResponseEither(responseBody) match {
       case Right(text) => text
@@ -1551,6 +1559,7 @@ Produce a structured plan with:
       case Some(n) => math.max(1, math.min(n, defaultSubLimit))
       case None => defaultSubLimit
     }
+    val invoker = makeInvoker(modelId)
     val msgBuf = scala.collection.mutable.ListBuffer[ChatTurn]()
     msgBuf ++= initialMessages
 
@@ -1597,15 +1606,11 @@ Produce a structured plan with:
 
         enforceRateLimit()
         try {
-          val responseJson = getClient.invokeModel(request).body().asUtf8String()
+          val responseJson = invoker(request)
           val (blocks, _) = ResponseParser.parseAnthropicContentBlocks(responseJson)
           val summaryText = blocks.collect { case ResponseParser.TextBlock(t) => t }
           if (summaryText.nonEmpty) textParts ++= summaryText
         } catch {
-          // Preserve the no-throw contract (we still want to return whatever
-          // the sub-agent accumulated), but don't lose the diagnostic: a
-          // silent catch made it impossible to tell whether the summary
-          // actually returned content or was suppressed by an exception.
           case NonFatal(e) =>
             ErrorHandler.safeWarn(
               s"[Assistant] Planning sub-agent final summary failed: ${e.getMessage}"
@@ -1624,7 +1629,7 @@ Produce a structured plan with:
           .build()
 
         enforceRateLimit()
-        val responseJson = getClient.invokeModel(request).body().asUtf8String()
+        val responseJson = invoker(request)
         val (blocks, _) = ResponseParser.parseAnthropicContentBlocks(responseJson)
 
         val currentTextParts = blocks.collect { case ResponseParser.TextBlock(t) => t }

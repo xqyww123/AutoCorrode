@@ -127,7 +127,7 @@ object ContextTracker {
         
         modelContextWindows.get(stripped).getOrElse {
           // Pattern match on model family
-          if (stripped.contains("claude-3-5") || stripped.contains("claude-3-7") || 
+          if (stripped.startsWith("claude-") || stripped.contains("claude-3-5") || stripped.contains("claude-3-7") ||
               stripped.contains("claude-3") || stripped.contains("claude-4")) {
             200000 // All Claude 3+ models support 200K
           } else {

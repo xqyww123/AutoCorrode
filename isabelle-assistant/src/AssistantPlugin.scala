@@ -90,6 +90,7 @@ class AssistantPlugin extends EBPlugin {
 
       Output.writeln(s"[Batch] Starting agent with prompt: ${prompt.take(80)}...")
       OpenAIAdapter.resetUsage()
+      ClaudeAdapter.resetUsage()
       val startTime = System.currentTimeMillis()
       try {
         BedrockClient.setCurrentView(view)
@@ -99,6 +100,7 @@ class AssistantPlugin extends EBPlugin {
         val elapsed = System.currentTimeMillis() - startTime
         Output.writeln(s"[Batch] Agent finished. Response length: ${response.length}")
         Output.writeln(s"[Batch] ${OpenAIAdapter.usageSummary}")
+        if (ClaudeAdapter.totalRequests > 0) Output.writeln(s"[Batch] ${ClaudeAdapter.usageSummary}")
         Output.writeln(s"[Batch] Elapsed: ${elapsed}ms")
         val resultJson = usageJson("completed", OpenAIAdapter.jsonStr(response), elapsed)
         writeResult(resultFile, resultJson)
@@ -108,6 +110,7 @@ class AssistantPlugin extends EBPlugin {
           val elapsed = System.currentTimeMillis() - startTime
           Output.error_message(s"[Batch] Error: ${ex.getMessage}")
           Output.writeln(s"[Batch] ${OpenAIAdapter.usageSummary}")
+          if (ClaudeAdapter.totalRequests > 0) Output.writeln(s"[Batch] ${ClaudeAdapter.usageSummary}")
           val resultJson = usageJson("error", OpenAIAdapter.jsonStr(Option(ex.getMessage).getOrElse("unknown")), elapsed)
           writeResult(resultFile, resultJson)
       }
@@ -125,18 +128,22 @@ class AssistantPlugin extends EBPlugin {
   }
 
   private def usageJson(status: String, contentJson: String, elapsedMs: Long): String = {
-    val uncached = OpenAIAdapter.totalPromptTokens - OpenAIAdapter.totalCachedTokens
+    val promptTokens = OpenAIAdapter.totalPromptTokens + ClaudeAdapter.totalPromptTokens
+    val cachedTokens = OpenAIAdapter.totalCachedTokens + ClaudeAdapter.totalCachedTokens
+    val completionTokens = OpenAIAdapter.totalCompletionTokens + ClaudeAdapter.totalCompletionTokens
+    val apiRequests = OpenAIAdapter.totalRequests + ClaudeAdapter.totalRequests
+    val uncached = promptTokens - cachedTokens
     val modelId = try { AssistantOptions.getModelId } catch { case _: Exception => "unknown" }
     s"""{
       |"status":${OpenAIAdapter.jsonStr(status)},
       |"${if (status == "error") "error" else "response"}":$contentJson,
       |"model":${OpenAIAdapter.jsonStr(modelId)},
       |"elapsed_ms":$elapsedMs,
-      |"prompt_tokens":${OpenAIAdapter.totalPromptTokens},
-      |"cached_tokens":${OpenAIAdapter.totalCachedTokens},
+      |"prompt_tokens":$promptTokens,
+      |"cached_tokens":$cachedTokens,
       |"uncached_prompt_tokens":$uncached,
-      |"completion_tokens":${OpenAIAdapter.totalCompletionTokens},
-      |"api_requests":${OpenAIAdapter.totalRequests},
+      |"completion_tokens":$completionTokens,
+      |"api_requests":$apiRequests,
       |"tool_calls":${OpenAIAdapter.totalToolCalls}
       |}""".stripMargin
   }

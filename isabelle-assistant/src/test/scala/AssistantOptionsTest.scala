@@ -53,6 +53,11 @@ class AssistantOptionsTest extends AnyFunSuite with Matchers {
     snapshot.baseModelId shouldBe "anthropic.claude-3-7-sonnet-20250219-v1:0"
   }
 
+  test("parseSnapshot should accept direct Claude API model IDs") {
+    val snapshot = parse(Map("assistant.model.id" -> "claude-sonnet-4-6"))
+    snapshot.baseModelId shouldBe "claude-sonnet-4-6"
+  }
+
   test("parseSnapshot should clamp numeric values to configured bounds") {
     val snapshot = parse(Map(
       "assistant.max.tokens" -> "99999999",

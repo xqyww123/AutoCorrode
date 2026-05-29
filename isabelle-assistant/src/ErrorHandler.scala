@@ -56,12 +56,12 @@ object ErrorHandler {
         msg.contains("network") || msg
           .contains("connection") || msg.contains("unreachable")
       )
-        "Network connection failed. Check your internet connection and verify ~/.aws/credentials or AWS_ACCESS_KEY_ID is set."
+        "Network connection failed. Check your internet connection and API credentials."
       else if (
         msg.contains("credentials") || msg.contains("unauthorized") || msg
           .contains("access denied")
       )
-        "AWS credentials are invalid or insufficient. Check ~/.aws/credentials, environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY), or IAM role permissions."
+        "API credentials are invalid or insufficient. Check your API key (ANTHROPIC_API_KEY, OPENAI_API_KEY) or AWS credentials (~/.aws/credentials, AWS_ACCESS_KEY_ID)."
       else if (msg.contains("model") && msg.contains("not found"))
         "The selected AI model is not available. Run :models to see available models, then :set model <id> to choose one."
       else if (
@@ -69,7 +69,7 @@ object ErrorHandler {
           "rate limit"
         ) || msg.contains("too many requests")
       )
-        "AWS service limit reached. Wait a moment and try again, or request a quota increase in the AWS console."
+        "Service rate limit reached. Wait a moment and try again, or request a quota increase from your provider."
       else if (msg.contains("json") || msg.contains("parse"))
         "Received invalid response from AI service. Please try again."
       else truncateError(message)
