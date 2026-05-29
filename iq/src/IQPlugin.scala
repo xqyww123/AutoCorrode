@@ -127,7 +127,15 @@ class IQPlugin extends EBPlugin {
 
   private def startServer(): Unit = {
     val securityConfig = buildSecurityConfig()
-    var tryPort = IQPlugin.DEFAULT_PORT
+    // Base port may be overridden via the IQ_MCP_PORT env var so that
+    // concurrent jEdit instances (e.g. one per evaluation worker) start their
+    // port scan from distinct bases instead of all contending for 8765. The
+    // upward BindException scan below still runs as a safety net.
+    val basePort =
+      Option(Isabelle_System.getenv("IQ_MCP_PORT")).map(_.trim).filter(_.nonEmpty)
+        .flatMap(_.toIntOption)
+        .getOrElse(IQPlugin.DEFAULT_PORT)
+    var tryPort = basePort
     val maxPort = tryPort + IQPlugin.MAX_PORT_SCAN
     var started = false
     while (!started && tryPort < maxPort) {
@@ -153,7 +161,7 @@ class IQPlugin extends EBPlugin {
     }
     if (!started) {
       Output.writeln(
-        s"Failed to start Isabelle/Q Server: no free port in range ${IQPlugin.DEFAULT_PORT}–${maxPort - 1}"
+        s"Failed to start Isabelle/Q Server: no free port in range ${basePort}–${maxPort - 1}"
       )
     }
   }

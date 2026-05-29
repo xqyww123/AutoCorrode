@@ -128,7 +128,7 @@ object AssistantConstants {
   val CHAT_CONTEXT_FETCH_TIMEOUT = 1000L
   val SUGGESTION_COLLECTION_TIMEOUT = 90000L
   val RETRY_BASE_DELAY_MS = 1000L
-  val MAX_RETRY_ATTEMPTS = 3
+  val MAX_RETRY_ATTEMPTS = 8
   
   // Thread coordination timeouts
   val GUI_DISPATCH_TIMEOUT = 3000L

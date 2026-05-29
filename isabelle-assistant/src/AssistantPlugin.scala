@@ -4,7 +4,7 @@
 package isabelle.assistant
 
 import isabelle._
-import org.gjt.sp.jedit.{EBMessage, EBPlugin}
+import org.gjt.sp.jedit.{EBMessage, EBPlugin, jEdit}
 import org.gjt.sp.jedit.msg.ViewUpdate
 
 /** jEdit plugin lifecycle: starts/stops Assistant services and cleans up resources. */
@@ -50,6 +50,13 @@ class AssistantPlugin extends EBPlugin {
   private def runBatch(view: org.gjt.sp.jedit.View, prompt: String, resultFile: String): Unit = {
     var exitCode = 1
     try {
+      val envModel = System.getenv("ASSISTANT_MODEL_ID")
+      if (envModel != null && envModel.nonEmpty) {
+        jEdit.setProperty("assistant.model.id", envModel)
+        AssistantOptions.invalidateCache()
+        Output.writeln(s"[Batch] Model override from env: $envModel")
+      }
+
       val deadlineMs = System.currentTimeMillis() + 600000L // 10 min max
 
       // Phase 1: wait for I/Q server
@@ -128,20 +135,19 @@ class AssistantPlugin extends EBPlugin {
   }
 
   private def usageJson(status: String, contentJson: String, elapsedMs: Long): String = {
-    val promptTokens = OpenAIAdapter.totalPromptTokens + ClaudeAdapter.totalPromptTokens
+    val uncachedTokens = OpenAIAdapter.totalUncachedTokens + ClaudeAdapter.totalUncachedTokens
     val cachedTokens = OpenAIAdapter.totalCachedTokens + ClaudeAdapter.totalCachedTokens
     val completionTokens = OpenAIAdapter.totalCompletionTokens + ClaudeAdapter.totalCompletionTokens
     val apiRequests = OpenAIAdapter.totalRequests + ClaudeAdapter.totalRequests
-    val uncached = promptTokens - cachedTokens
     val modelId = try { AssistantOptions.getModelId } catch { case _: Exception => "unknown" }
     s"""{
       |"status":${OpenAIAdapter.jsonStr(status)},
       |"${if (status == "error") "error" else "response"}":$contentJson,
       |"model":${OpenAIAdapter.jsonStr(modelId)},
       |"elapsed_ms":$elapsedMs,
-      |"prompt_tokens":$promptTokens,
+      |"uncached_prompt_tokens":$uncachedTokens,
       |"cached_tokens":$cachedTokens,
-      |"uncached_prompt_tokens":$uncached,
+      |"prompt_tokens":${uncachedTokens + cachedTokens},
       |"completion_tokens":$completionTokens,
       |"api_requests":$apiRequests,
       |"tool_calls":${OpenAIAdapter.totalToolCalls}

@@ -17,25 +17,25 @@ import software.amazon.awssdk.thirdparty.jackson.core.{JsonFactory, JsonToken}
 
 object ClaudeAdapter {
 
-  private val _totalPromptTokens = new java.util.concurrent.atomic.AtomicLong(0)
+  private val _totalUncachedTokens = new java.util.concurrent.atomic.AtomicLong(0)
   private val _totalCompletionTokens = new java.util.concurrent.atomic.AtomicLong(0)
   private val _totalCachedTokens = new java.util.concurrent.atomic.AtomicLong(0)
   private val _totalRequests = new java.util.concurrent.atomic.AtomicLong(0)
 
   def resetUsage(): Unit = {
-    _totalPromptTokens.set(0)
+    _totalUncachedTokens.set(0)
     _totalCompletionTokens.set(0)
     _totalCachedTokens.set(0)
     _totalRequests.set(0)
   }
 
-  def totalPromptTokens: Long = _totalPromptTokens.get()
+  def totalUncachedTokens: Long = _totalUncachedTokens.get()
   def totalCompletionTokens: Long = _totalCompletionTokens.get()
   def totalCachedTokens: Long = _totalCachedTokens.get()
   def totalRequests: Long = _totalRequests.get()
 
   def usageSummary: String =
-    s"Claude API usage: ${totalRequests} requests, ${totalPromptTokens} prompt tokens (${totalCachedTokens} cached), ${totalCompletionTokens} completion tokens"
+    s"Claude API usage: ${totalRequests} requests, ${totalUncachedTokens + totalCachedTokens} prompt tokens (${totalCachedTokens} cached), ${totalCompletionTokens} completion tokens"
 
   def isClaudeDirectModel(modelId: String): Boolean =
     modelId.startsWith("claude-")
@@ -43,8 +43,9 @@ object ClaudeAdapter {
   def makeInvoker(apiKey: String, baseUrl: String = "https://api.anthropic.com"): InvokeModelRequest => String = {
     request => {
       val rawPayload = request.body().asUtf8String()
-      val payload = stripBedrockVersion(rawPayload)
+      val stripped = stripBedrockVersion(rawPayload)
       val modelId = request.modelId()
+      val payload = injectModel(stripped, modelId)
 
       Output.writeln(s"[Assistant] Claude API call, model=$modelId, payload size=${payload.length}")
       val response = callMessages(payload, apiKey, baseUrl)
@@ -55,6 +56,11 @@ object ClaudeAdapter {
   }
 
   private val jsonFactory = new JsonFactory()
+
+  private[assistant] def injectModel(json: String, modelId: String): String = {
+    if (json.contains("\"model\"")) json
+    else s"""{"model":"$modelId",${json.stripLeading().stripPrefix("{")}"""
+  }
 
   private[assistant] def stripBedrockVersion(json: String): String = {
     val parser = jsonFactory.createParser(json)
@@ -152,10 +158,10 @@ object ClaudeAdapter {
     val root = JSON.parse(responseJson)
     val usage = JSON.value(root, "usage").getOrElse(Map.empty[String, Any])
       .asInstanceOf[Map[String, Any]]
-    val input = intFromJson(usage, "input_tokens")
+    val uncached = intFromJson(usage, "input_tokens")
     val output = intFromJson(usage, "output_tokens")
     val cached = intFromJson(usage, "cache_read_input_tokens")
-    val _ = _totalPromptTokens.addAndGet(input.toLong)
+    val _ = _totalUncachedTokens.addAndGet(uncached.toLong)
     val _ = _totalCompletionTokens.addAndGet(output.toLong)
     val _ = _totalCachedTokens.addAndGet(cached.toLong)
     val _ = _totalRequests.incrementAndGet()

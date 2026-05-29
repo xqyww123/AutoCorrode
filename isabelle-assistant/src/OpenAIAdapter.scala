@@ -16,21 +16,21 @@ import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelRequest
 
 object OpenAIAdapter {
 
-  private val _totalPromptTokens = new java.util.concurrent.atomic.AtomicLong(0)
+  private val _totalUncachedTokens = new java.util.concurrent.atomic.AtomicLong(0)
   private val _totalCompletionTokens = new java.util.concurrent.atomic.AtomicLong(0)
   private val _totalCachedTokens = new java.util.concurrent.atomic.AtomicLong(0)
   private val _totalRequests = new java.util.concurrent.atomic.AtomicLong(0)
   private val _totalToolCalls = new java.util.concurrent.atomic.AtomicLong(0)
 
   def resetUsage(): Unit = {
-    _totalPromptTokens.set(0)
+    _totalUncachedTokens.set(0)
     _totalCompletionTokens.set(0)
     _totalCachedTokens.set(0)
     _totalRequests.set(0)
     _totalToolCalls.set(0)
   }
 
-  def totalPromptTokens: Long = _totalPromptTokens.get()
+  def totalUncachedTokens: Long = _totalUncachedTokens.get()
   def totalCompletionTokens: Long = _totalCompletionTokens.get()
   def totalCachedTokens: Long = _totalCachedTokens.get()
   def totalRequests: Long = _totalRequests.get()
@@ -38,7 +38,7 @@ object OpenAIAdapter {
   def addToolCalls(n: Int): Unit = { val _ = _totalToolCalls.addAndGet(n.toLong) }
 
   def usageSummary: String =
-    s"OpenAI usage: ${totalRequests} requests, ${totalPromptTokens} prompt tokens (${totalCachedTokens} cached), ${totalCompletionTokens} completion tokens"
+    s"OpenAI usage: ${totalRequests} requests, ${totalUncachedTokens + totalCachedTokens} prompt tokens (${totalCachedTokens} cached), ${totalCompletionTokens} completion tokens"
 
   private def intFromJson(obj: Map[String, Any], key: String): Int =
     JSON.int(obj, key).orElse(
@@ -49,13 +49,13 @@ object OpenAIAdapter {
     val root = JSON.parse(responseJson)
     val usage = JSON.value(root, "usage").getOrElse(Map.empty[String, Any])
       .asInstanceOf[Map[String, Any]]
-    val input = intFromJson(usage, "input_tokens")
+    val total = intFromJson(usage, "input_tokens")
     val output = intFromJson(usage, "output_tokens")
     val cached = JSON.value(usage, "input_tokens_details")
       .collect { case m: Map[String @unchecked, _] => m.asInstanceOf[Map[String, Any]] }
       .map(d => intFromJson(d, "cached_tokens"))
       .getOrElse(0)
-    val _ = _totalPromptTokens.addAndGet(input.toLong)
+    val _ = _totalUncachedTokens.addAndGet((total - cached).toLong)
     val _ = _totalCompletionTokens.addAndGet(output.toLong)
     val _ = _totalCachedTokens.addAndGet(cached.toLong)
     val _ = _totalRequests.incrementAndGet()
