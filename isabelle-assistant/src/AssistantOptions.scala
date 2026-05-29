@@ -581,10 +581,10 @@ object AssistantOptions {
       raw: String, name: String, n: Normalizer
   ): String =
     if (raw == USE_MAIN_MODEL_LABEL || raw.isEmpty) ""
-    else if (BedrockModels.isAnthropicModelId(raw)) raw
+    else if (BedrockModels.isAnthropicModelId(raw) || OpenAIAdapter.isOpenAIModel(raw)) raw
     else {
       n.warn(
-        s"$name Model ID '$raw' is not a valid Anthropic model and has been cleared. " +
+        s"$name Model ID '$raw' is not a valid model and has been cleared. " +
           s"$name operations will use the main model."
       )
       ""
@@ -815,7 +815,8 @@ object AssistantOptions {
 
   def getPlanningModelId: String = {
     val base = getPlanningBaseModelId
-    if (base.isEmpty) getModelId // Fallback to main model if planning model not set
+    if (base.isEmpty) getModelId
+    else if (OpenAIAdapter.isOpenAIModel(base)) base
     else if (getUseCris) BedrockModels.applyCrisPrefix(base, getRegion)
     else base
   }
@@ -826,7 +827,8 @@ object AssistantOptions {
 
   def getSummarizationModelId: String = {
     val base = getSummarizationBaseModelId
-    if (base.isEmpty) getModelId // Fallback to main model if summarization model not set
+    if (base.isEmpty) getModelId
+    else if (OpenAIAdapter.isOpenAIModel(base)) base
     else if (getUseCris) BedrockModels.applyCrisPrefix(base, getRegion)
     else base
   }
