@@ -38,6 +38,15 @@ object BedrockClient {
   private val lastApiCallMs = new java.util.concurrent.atomic.AtomicLong(0L)
   private val minIntervalMs = AssistantConstants.MIN_API_INTERVAL_MS
 
+  /** Total wall-clock time (ms) spent blocked on API throttling: both the
+   *  rate-limit pacing in `enforceRateLimit` and the post-failure exponential
+   *  backoff in `retryWithBackoff`. Accumulated over the whole batch and
+   *  reported as `quota_wait_time`, mirroring AoA's
+   *  `LMDriver.total_quota_wait_time` (pure overhead, not model/Isabelle work). */
+  private val _totalWaitMs = new java.util.concurrent.atomic.AtomicLong(0L)
+  def totalWaitMs: Long = _totalWaitMs.get()
+  def resetWaitTime(): Unit = _totalWaitMs.set(0L)
+
   enum ModelValidationError {
     case MissingModel
     case InvalidFormat(modelId: String)
@@ -145,6 +154,7 @@ object BedrockClient {
     }
     val wait = reserved - System.currentTimeMillis()
     if (wait > 0) {
+      val t0 = System.currentTimeMillis()
       try Thread.sleep(wait)
       catch {
         case _: InterruptedException =>
@@ -153,6 +163,10 @@ object BedrockClient {
           // this, sleep would silently swallow the interrupt and the
           // caller would keep running past the cancel request.
           Thread.currentThread().interrupt()
+      } finally {
+        // Count actual elapsed (not `wait`) so an interrupted early-return
+        // sleep contributes only the time really spent blocked.
+        val _ = _totalWaitMs.addAndGet(System.currentTimeMillis() - t0)
       }
     }
   }
@@ -588,6 +602,7 @@ object BedrockClient {
             // Cap exponential backoff at 30 seconds
             val delay = math.min(30000L, baseRetryDelayMs * math.pow(2, attempt - 1).toLong)
             Output.writeln(s"[Assistant] Attempt $attempt failed, retrying in ${delay}ms: ${ErrorHandler.makeUserFriendly(ex.getMessage, "request")}")
+            val t0 = System.currentTimeMillis()
             try Thread.sleep(delay)
             catch {
               case _: InterruptedException =>
@@ -597,6 +612,10 @@ object BedrockClient {
                 // proceed regardless.
                 Thread.currentThread().interrupt()
                 throw new RuntimeException("Operation cancelled")
+            } finally {
+              // Count actual elapsed even on interrupt (finally runs before the
+              // rethrow), so a cancelled backoff contributes only what it slept.
+              val _ = _totalWaitMs.addAndGet(System.currentTimeMillis() - t0)
             }
             retry(attempt + 1, Some(ex))
           } else {

@@ -33,6 +33,10 @@ object OpenAIAdapter {
   def totalUncachedTokens: Long = _totalUncachedTokens.get()
   def totalCompletionTokens: Long = _totalCompletionTokens.get()
   def totalCachedTokens: Long = _totalCachedTokens.get()
+  // OpenAI's API has no prompt-cache WRITE concept (only cached reads), so there
+  // is never a cache-creation count. Exposed as a constant 0 so AssistantPlugin
+  // can sum both adapters symmetrically with the Claude adapter.
+  def totalCacheCreationTokens: Long = 0
   def totalRequests: Long = _totalRequests.get()
   def totalToolCalls: Long = _totalToolCalls.get()
   def addToolCalls(n: Int): Unit = { val _ = _totalToolCalls.addAndGet(n.toLong) }

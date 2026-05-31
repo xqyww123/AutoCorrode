@@ -20,22 +20,25 @@ object ClaudeAdapter {
   private val _totalUncachedTokens = new java.util.concurrent.atomic.AtomicLong(0)
   private val _totalCompletionTokens = new java.util.concurrent.atomic.AtomicLong(0)
   private val _totalCachedTokens = new java.util.concurrent.atomic.AtomicLong(0)
+  private val _totalCacheCreationTokens = new java.util.concurrent.atomic.AtomicLong(0)
   private val _totalRequests = new java.util.concurrent.atomic.AtomicLong(0)
 
   def resetUsage(): Unit = {
     _totalUncachedTokens.set(0)
     _totalCompletionTokens.set(0)
     _totalCachedTokens.set(0)
+    _totalCacheCreationTokens.set(0)
     _totalRequests.set(0)
   }
 
   def totalUncachedTokens: Long = _totalUncachedTokens.get()
   def totalCompletionTokens: Long = _totalCompletionTokens.get()
   def totalCachedTokens: Long = _totalCachedTokens.get()
+  def totalCacheCreationTokens: Long = _totalCacheCreationTokens.get()
   def totalRequests: Long = _totalRequests.get()
 
   def usageSummary: String =
-    s"Claude API usage: ${totalRequests} requests, ${totalUncachedTokens + totalCachedTokens} prompt tokens (${totalCachedTokens} cached), ${totalCompletionTokens} completion tokens"
+    s"Claude API usage: ${totalRequests} requests, ${totalUncachedTokens + totalCacheCreationTokens + totalCachedTokens} prompt tokens (${totalCacheCreationTokens} cache-write, ${totalCachedTokens} cache-read), ${totalCompletionTokens} completion tokens"
 
   def isClaudeDirectModel(modelId: String): Boolean =
     modelId.startsWith("claude-")
@@ -161,9 +164,11 @@ object ClaudeAdapter {
     val uncached = intFromJson(usage, "input_tokens")
     val output = intFromJson(usage, "output_tokens")
     val cached = intFromJson(usage, "cache_read_input_tokens")
+    val cacheCreation = intFromJson(usage, "cache_creation_input_tokens")
     val _ = _totalUncachedTokens.addAndGet(uncached.toLong)
     val _ = _totalCompletionTokens.addAndGet(output.toLong)
     val _ = _totalCachedTokens.addAndGet(cached.toLong)
+    val _ = _totalCacheCreationTokens.addAndGet(cacheCreation.toLong)
     val _ = _totalRequests.incrementAndGet()
   }
 

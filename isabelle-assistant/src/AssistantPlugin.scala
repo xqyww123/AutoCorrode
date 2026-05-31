@@ -98,6 +98,7 @@ class AssistantPlugin extends EBPlugin {
       Output.writeln(s"[Batch] Starting agent with prompt: ${prompt.take(80)}...")
       OpenAIAdapter.resetUsage()
       ClaudeAdapter.resetUsage()
+      BedrockClient.resetWaitTime()
       val startTime = System.currentTimeMillis()
       try {
         BedrockClient.setCurrentView(view)
@@ -137,6 +138,10 @@ class AssistantPlugin extends EBPlugin {
   private def usageJson(status: String, contentJson: String, elapsedMs: Long): String = {
     val uncachedTokens = OpenAIAdapter.totalUncachedTokens + ClaudeAdapter.totalUncachedTokens
     val cachedTokens = OpenAIAdapter.totalCachedTokens + ClaudeAdapter.totalCachedTokens
+    // Anthropic prompt caching reports a separate cache-WRITE count
+    // (cache_creation_input_tokens), billed at a premium. OpenAI has no such
+    // concept and its adapter reports 0, so summing both stays symmetric.
+    val cacheCreationTokens = OpenAIAdapter.totalCacheCreationTokens + ClaudeAdapter.totalCacheCreationTokens
     val completionTokens = OpenAIAdapter.totalCompletionTokens + ClaudeAdapter.totalCompletionTokens
     val apiRequests = OpenAIAdapter.totalRequests + ClaudeAdapter.totalRequests
     val modelId = try { AssistantOptions.getModelId } catch { case _: Exception => "unknown" }
@@ -146,11 +151,13 @@ class AssistantPlugin extends EBPlugin {
       |"model":${OpenAIAdapter.jsonStr(modelId)},
       |"elapsed_ms":$elapsedMs,
       |"uncached_prompt_tokens":$uncachedTokens,
+      |"cache_creation_tokens":$cacheCreationTokens,
       |"cached_tokens":$cachedTokens,
-      |"prompt_tokens":${uncachedTokens + cachedTokens},
+      |"prompt_tokens":${uncachedTokens + cacheCreationTokens + cachedTokens},
       |"completion_tokens":$completionTokens,
       |"api_requests":$apiRequests,
-      |"tool_calls":${OpenAIAdapter.totalToolCalls}
+      |"tool_calls":${OpenAIAdapter.totalToolCalls},
+      |"quota_wait_ms":${BedrockClient.totalWaitMs}
       |}""".stripMargin
   }
 

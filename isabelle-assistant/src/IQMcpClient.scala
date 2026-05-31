@@ -41,11 +41,24 @@ object IQMcpClient {
     * the supplied cancellation token was tripped. */
   private[assistant] val CancelledErrorMessage = "cancelled"
 
-  /** Read the I/Q MCP port from the system property set by the I/Q plugin,
-    * falling back to the default if the property is absent or malformed. */
+  /** Resolve the I/Q MCP port.
+    *
+    * Preference order:
+    *  1. the `IQ_MCP_PORT` env var — the authoritative per-worker assignment set
+    *     by the evaluator. It is present from process start, so it is correct even
+    *     during the STARTUP WINDOW before the I/Q plugin publishes its system
+    *     property. Preferring it eliminates the race where this client would
+    *     otherwise fall back to the hardcoded 8765 and either be refused or, worse,
+    *     connect to ANOTHER worker's jEdit on 8765 — stranding Phase-2 "theory not
+    *     loaded" until the 10-minute timeout;
+    *  2. the `iq.mcp.port` system property published by the I/Q plugin after its
+    *     server binds — the normal path when IQ_MCP_PORT is unset (interactive use);
+    *  3. the hardcoded default as a last resort. */
   private def currentPort: Int =
-    try { System.getProperty("iq.mcp.port", "8765").trim.toInt }
-    catch { case _: NumberFormatException => AssistantConstants.DEFAULT_MCP_PORT }
+    Option(Isabelle_System.getenv("IQ_MCP_PORT")).map(_.trim).filter(_.nonEmpty)
+      .orElse(Option(System.getProperty("iq.mcp.port")).map(_.trim).filter(_.nonEmpty))
+      .flatMap(_.toIntOption)
+      .getOrElse(AssistantConstants.DEFAULT_MCP_PORT)
 
   /** Connection pool for persistent TCP connection to I/Q MCP server.
     * Reuses connections to avoid per-call socket overhead (250ms per connect).
@@ -59,12 +72,33 @@ object IQMcpClient {
     private val keepaliveIntervalMs = 30000L // 30 seconds
 
     private def connectTo(port: Int, socketTimeout: Int): (Socket, BufferedReader, PrintWriter) = {
+      // DIAG: pinpoint why per-worker MCP ports (8865/8965) intermittently fail.
+      // Logs the resolved port + raw system property, and the exact failure stage
+      // (TCP connect vs auth). ConnectException on a wrong port ⇒ port race (A);
+      // SocketTimeoutException on the right port ⇒ accept-loop starvation (B).
+      val rawProp = System.getProperty("iq.mcp.port")
       val s = new Socket()
-      s.connect(new InetSocketAddress(host, port), connectTimeoutMs)
+      try {
+        s.connect(new InetSocketAddress(host, port), connectTimeoutMs)
+      } catch {
+        case ex: Exception =>
+          Output.writeln(s"[IQMcpClient][diag] TCP connect FAILED -> $host:$port " +
+            s"(iq.mcp.port=$rawProp, connectTimeout=${connectTimeoutMs}ms): " +
+            s"${ex.getClass.getSimpleName}: ${ex.getMessage}")
+          throw ex
+      }
       s.setSoTimeout(socketTimeout)
       val r = new BufferedReader(new InputStreamReader(s.getInputStream, StandardCharsets.UTF_8))
       val w = new PrintWriter(new OutputStreamWriter(s.getOutputStream, StandardCharsets.UTF_8), true)
-      authenticateConnection(r, w)
+      try {
+        authenticateConnection(r, w)
+      } catch {
+        case ex: Exception =>
+          Output.writeln(s"[IQMcpClient][diag] AUTH FAILED -> $host:$port " +
+            s"(iq.mcp.port=$rawProp): ${ex.getClass.getSimpleName}: ${ex.getMessage}")
+          throw ex
+      }
+      Output.writeln(s"[IQMcpClient][diag] connected OK -> $host:$port (iq.mcp.port=$rawProp)")
       (s, r, w)
     }
 
