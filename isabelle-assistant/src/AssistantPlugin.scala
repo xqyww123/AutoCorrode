@@ -57,15 +57,15 @@ class AssistantPlugin extends EBPlugin {
         Output.writeln(s"[Batch] Model override from env: $envModel")
       }
 
-      val deadlineMs = System.currentTimeMillis() + 600000L // 10 min max
+      val deadlineMs = System.currentTimeMillis() + 180000L // 3 min max
 
       // Phase 1: wait for I/Q server
       Output.writeln("[Batch] Waiting for I/Q server...")
       while (!IQAvailable.isAvailable) {
         if (System.currentTimeMillis() > deadlineMs) {
-          val msg = "TIMEOUT: I/Q server not available after 10 minutes"
+          val msg = "TIMEOUT: I/Q server not available after 3 minutes"
           Output.error_message(s"[Batch] $msg")
-          writeResult(resultFile, usageJson("error", OpenAIAdapter.jsonStr(msg), 600000L))
+          writeResult(resultFile, usageJson("error", OpenAIAdapter.jsonStr(msg), 180000L))
           return
         }
         Thread.sleep(2000)
@@ -77,9 +77,9 @@ class AssistantPlugin extends EBPlugin {
       var theoryReady = false
       while (!theoryReady) {
         if (System.currentTimeMillis() > deadlineMs) {
-          val msg = "TIMEOUT: No theory file loaded in PIDE after 10 minutes"
+          val msg = "TIMEOUT: No theory file loaded in PIDE after 3 minutes"
           Output.error_message(s"[Batch] $msg")
-          writeResult(resultFile, usageJson("error", OpenAIAdapter.jsonStr(msg), 600000L))
+          writeResult(resultFile, usageJson("error", OpenAIAdapter.jsonStr(msg), 180000L))
           return
         }
         IQMcpClient.callListFiles(

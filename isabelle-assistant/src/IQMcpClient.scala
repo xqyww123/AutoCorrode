@@ -50,7 +50,7 @@ object IQMcpClient {
     *     property. Preferring it eliminates the race where this client would
     *     otherwise fall back to the hardcoded 8765 and either be refused or, worse,
     *     connect to ANOTHER worker's jEdit on 8765 — stranding Phase-2 "theory not
-    *     loaded" until the 10-minute timeout;
+    *     loaded" until the 3-minute timeout;
     *  2. the `iq.mcp.port` system property published by the I/Q plugin after its
     *     server binds — the normal path when IQ_MCP_PORT is unset (interactive use);
     *  3. the hardcoded default as a last resort. */
