@@ -44,19 +44,24 @@ object IQMcpClient {
   /** Resolve the I/Q MCP port.
     *
     * Preference order:
-    *  1. the `IQ_MCP_PORT` env var — the authoritative per-worker assignment set
-    *     by the evaluator. It is present from process start, so it is correct even
-    *     during the STARTUP WINDOW before the I/Q plugin publishes its system
-    *     property. Preferring it eliminates the race where this client would
-    *     otherwise fall back to the hardcoded 8765 and either be refused or, worse,
-    *     connect to ANOTHER worker's jEdit on 8765 — stranding Phase-2 "theory not
-    *     loaded" until the 3-minute timeout;
-    *  2. the `iq.mcp.port` system property published by the I/Q plugin after its
-    *     server binds — the normal path when IQ_MCP_PORT is unset (interactive use);
+    *  1. the `iq.mcp.port` system property — the port the in-JVM I/Q server
+    *     ACTUALLY bound. `IQPlugin.startServer` requests the base port (see #2)
+    *     but, on BindException, scans upward (base, base+1, …) and publishes the
+    *     port it finally bound. The env base and the bound port therefore DIVERGE
+    *     whenever the base was occupied (e.g. worker w0's base is 8765, the
+    *     universal default, so its server frequently lands on 8766+). Each
+    *     worker's jEdit is a SEPARATE JVM, so this property always names *this*
+    *     worker's own server — reading it can never reach another worker. This is
+    *     the authoritative value once the server has bound;
+    *  2. the `IQ_MCP_PORT` env var — the per-worker base requested by the
+    *     evaluator. Used only as the STARTUP-WINDOW fallback, before the server
+    *     publishes its property. It is the right base to try first (avoids the
+    *     cross-worker 8765 collision for w1+), and the connect loop self-heals to
+    *     the bound port as soon as #1 appears;
     *  3. the hardcoded default as a last resort. */
   private def currentPort: Int =
-    Option(Isabelle_System.getenv("IQ_MCP_PORT")).map(_.trim).filter(_.nonEmpty)
-      .orElse(Option(System.getProperty("iq.mcp.port")).map(_.trim).filter(_.nonEmpty))
+    Option(System.getProperty("iq.mcp.port")).map(_.trim).filter(_.nonEmpty)
+      .orElse(Option(Isabelle_System.getenv("IQ_MCP_PORT")).map(_.trim).filter(_.nonEmpty))
       .flatMap(_.toIntOption)
       .getOrElse(AssistantConstants.DEFAULT_MCP_PORT)
 
