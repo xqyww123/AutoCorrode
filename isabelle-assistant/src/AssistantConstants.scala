@@ -58,7 +58,7 @@ object AssistantConstants {
     * 4.6 up to 200K) for tool outputs and the response itself. Raise via
     * Plugin Options if a session is hitting the soft truncation cap. */
   val DEFAULT_MAX_CONTEXT_TOKENS = 1000000
-  val DEFAULT_MAX_TOOL_ITERATIONS = 500
+  val DEFAULT_MAX_TOOL_ITERATIONS = 250
   /** Size of the sliding window of recent tool-call signatures kept for stuck-loop detection. */
   val LOOP_DETECTION_WINDOW = 6
   /** Minimum number of identical consecutive tool calls that trigger stuck-loop detection. */
