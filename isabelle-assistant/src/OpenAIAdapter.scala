@@ -102,6 +102,9 @@ object OpenAIAdapter {
         Output.writeln(s"[Assistant] Responses API call ($mode), payload size=${payload.length}")
         val response = callResponses(payload, apiKey, baseUrl)
         recordUsage(response)
+        // Capture the RAW Responses request + response (with per-round usage +
+        // reasoning) before the lossy Anthropic conversion below.
+        BedrockClient.appendRawTranscript(modelId, payload, response)
         // With store disabled the server keeps no response to chain from, so
         // never retain an id — this forces full-context mode on every call.
         lastResponseId = if (storeEnabled) extractResponseId(response) else None
@@ -115,6 +118,7 @@ object OpenAIAdapter {
           Output.writeln("[Assistant] Responses API fallback call (full)")
           val response = callResponses(payload, apiKey, baseUrl)
           recordUsage(response)
+          BedrockClient.appendRawTranscript(modelId, payload, response)
           lastResponseId = extractResponseId(response)
           Output.writeln(s"[Assistant] Fallback succeeded (response_id=${lastResponseId.getOrElse("none")})")
           responsesToAnthropic(response)

@@ -272,6 +272,38 @@ object BedrockClient {
     }
   }
 
+  /** Append a RAW upstream exchange as a separate `kind:"raw"` JSONL line. Used by
+    * OpenAIAdapter to capture the raw Responses-API request + response (which carry
+    * per-round `usage`/cached tokens + reasoning) that the Anthropic-converted form
+    * dropped. Correlate with the adjacent main line (written right after, next seq). */
+  private[assistant] def appendRawTranscript(
+    modelId: String,
+    rawRequest: String,
+    rawResponse: String
+  ): Unit = transcriptPath.foreach { path =>
+    try {
+      val seq = transcriptSeq.incrementAndGet()
+      val ts = System.currentTimeMillis()
+      val thread = Thread.currentThread().getName
+      val line =
+        "{\"seq\":" + seq +
+          ",\"ts\":" + ts +
+          ",\"kind\":\"raw\"" +
+          ",\"thread\":" + OpenAIAdapter.jsonStr(thread) +
+          ",\"model\":" + OpenAIAdapter.jsonStr(modelId) +
+          ",\"raw_request\":" + OpenAIAdapter.jsonStr(rawRequest) +
+          ",\"raw_response\":" + OpenAIAdapter.jsonStr(rawResponse) +
+          "}\n"
+      transcriptLock.synchronized {
+        val w = new java.io.FileWriter(new java.io.File(path), true)
+        try w.write(line) finally w.close()
+      }
+    } catch {
+      case NonFatal(ex) =>
+        ErrorHandler.safeWarn(s"[Assistant] Raw transcript append failed: ${ex.getMessage}")
+    }
+  }
+
   private def withTranscript(
     modelId: String,
     inner: InvokeModelRequest => String
