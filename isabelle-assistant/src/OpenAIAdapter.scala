@@ -71,12 +71,12 @@ object OpenAIAdapter {
   def extractOpenAIModel(modelId: String): String =
     if (modelId.startsWith("openai/")) modelId.stripPrefix("openai/") else modelId
 
-  // Whether to use the Responses API server-side store + previous_response_id
-  // chaining. Real OpenAI requires store=true for that chaining; some
-  // OpenAI-compatible gateways reject store=true ("Store must be set to false")
-  // and keep no server-side state. Set OPENAI_RESPONSES_STORE=false for those:
-  // we then send store=false AND never chain (always full context per call),
-  // since previous_response_id is meaningless without server-side storage.
+  // Compat switch for strict OpenAI-compatible gateways. Real OpenAI accepts
+  // the Responses API extras `store:true` (+ previous_response_id chaining) and
+  // `truncation:auto`; some gateways reject them ("Store must be set to false",
+  // "Unsupported parameter: truncation"). Set OPENAI_RESPONSES_STORE=false for
+  // those: we then send store:false, omit truncation, and never chain (always
+  // full context per call, since previous_response_id needs server-side state).
   private val storeEnabled: Boolean =
     Option(System.getenv("OPENAI_RESPONSES_STORE"))
       .map(_.trim.toLowerCase)
@@ -197,7 +197,10 @@ object OpenAIAdapter {
 
     sb.append(""","reasoning":{"effort":"high"}""")
     sb.append(if (storeEnabled) ""","store":true""" else ""","store":false""")
-    sb.append(",\"truncation\":\"auto\"")
+    // `truncation` is a real-OpenAI-only extra; strict compat gateways reject it
+    // ("Unsupported parameter: truncation"). Gate it on the same compat switch
+    // as `store` (OPENAI_RESPONSES_STORE=false) so those gateways accept the call.
+    if (storeEnabled) { val _ = sb.append(",\"truncation\":\"auto\"") }
 
     previousResponseId.foreach { id =>
       sb.append(s""","previous_response_id":${jsonStr(id)}""")
