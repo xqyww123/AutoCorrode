@@ -205,18 +205,89 @@ object BedrockClient {
   /** Create the appropriate invoker for a model ID.
     * For loop methods, call once and reuse; for one-shot methods, call per invocation. */
   private def makeInvoker(modelId: String): InvokeModelRequest => String = {
-    if (OpenAIAdapter.isOpenAIModel(modelId)) {
-      val apiKey = Option(System.getenv("OPENAI_API_KEY")).getOrElse(
-        throw new RuntimeException("OPENAI_API_KEY environment variable not set"))
-      val baseUrl = Option(System.getenv("OPENAI_BASE_URL")).getOrElse("https://api.openai.com/v1")
-      OpenAIAdapter.makeInvoker(apiKey, baseUrl)
-    } else if (ClaudeAdapter.isClaudeDirectModel(modelId)) {
-      val apiKey = Option(System.getenv("ANTHROPIC_API_KEY")).getOrElse(
-        throw new RuntimeException("ANTHROPIC_API_KEY environment variable not set"))
-      val baseUrl = Option(System.getenv("ANTHROPIC_BASE_URL")).getOrElse("https://api.anthropic.com")
-      ClaudeAdapter.makeInvoker(apiKey, baseUrl)
-    } else {
-      request => getClient.invokeModel(request).body().asUtf8String()
+    val base: InvokeModelRequest => String =
+      if (OpenAIAdapter.isOpenAIModel(modelId)) {
+        val apiKey = Option(System.getenv("OPENAI_API_KEY")).getOrElse(
+          throw new RuntimeException("OPENAI_API_KEY environment variable not set"))
+        val baseUrl = Option(System.getenv("OPENAI_BASE_URL")).getOrElse("https://api.openai.com/v1")
+        OpenAIAdapter.makeInvoker(apiKey, baseUrl)
+      } else if (ClaudeAdapter.isClaudeDirectModel(modelId)) {
+        val apiKey = Option(System.getenv("ANTHROPIC_API_KEY")).getOrElse(
+          throw new RuntimeException("ANTHROPIC_API_KEY environment variable not set"))
+        val baseUrl = Option(System.getenv("ANTHROPIC_BASE_URL")).getOrElse("https://api.anthropic.com")
+        ClaudeAdapter.makeInvoker(apiKey, baseUrl)
+      } else {
+        request => getClient.invokeModel(request).body().asUtf8String()
+      }
+    withTranscript(modelId, base)
+  }
+
+  // --- Full LLM-interaction transcript (opt-in via env) ----------------------
+  //
+  // When ASSISTANT_BATCH_TRANSCRIPT_FILE is set (batch / eval runs), every LLM
+  // round's COMPLETE request payload (system prompt + full message history +
+  // tool definitions) and COMPLETE raw response (text + tool_use blocks) are
+  // appended as one JSONL line. Because this wraps the single shared invoker
+  // returned by makeInvoker, it captures EVERY model call — the main agentic
+  // loop, parallel planning sub-agents, structured calls and single-prompt
+  // calls alike. Tool calls and their results need no special handling: each
+  // round's request payload already embeds all prior tool_use / tool_result
+  // blocks, so the full transcript is reconstructable from these lines.
+  //
+  // request/response are stored as JSON *strings* (escaped via jsonStr) rather
+  // than raw embedded JSON, so a line stays valid JSONL even when a gateway
+  // returns a non-JSON error body (the 403/503 case). Decode each field once.
+  private val transcriptPath: Option[String] =
+    Option(System.getenv("ASSISTANT_BATCH_TRANSCRIPT_FILE")).filter(_.trim.nonEmpty)
+  private val transcriptSeq = new java.util.concurrent.atomic.AtomicInteger(0)
+  private val transcriptLock = new Object
+
+  private def appendTranscript(
+    modelId: String,
+    requestBody: String,
+    response: Either[String, String]
+  ): Unit = transcriptPath.foreach { path =>
+    try {
+      val seq = transcriptSeq.incrementAndGet()
+      val ts = System.currentTimeMillis()
+      val thread = Thread.currentThread().getName
+      val tail = response match {
+        case Right(r)  => ",\"response\":" + OpenAIAdapter.jsonStr(r)
+        case Left(err) => ",\"error\":" + OpenAIAdapter.jsonStr(err)
+      }
+      val line =
+        "{\"seq\":" + seq +
+          ",\"ts\":" + ts +
+          ",\"thread\":" + OpenAIAdapter.jsonStr(thread) +
+          ",\"model\":" + OpenAIAdapter.jsonStr(modelId) +
+          ",\"request\":" + OpenAIAdapter.jsonStr(requestBody) +
+          tail + "}\n"
+      transcriptLock.synchronized {
+        val w = new java.io.FileWriter(new java.io.File(path), true)
+        try w.write(line) finally w.close()
+      }
+    } catch {
+      case NonFatal(ex) =>
+        ErrorHandler.safeWarn(s"[Assistant] Transcript append failed: ${ex.getMessage}")
+    }
+  }
+
+  private def withTranscript(
+    modelId: String,
+    inner: InvokeModelRequest => String
+  ): InvokeModelRequest => String = {
+    if (transcriptPath.isEmpty) inner
+    else { request =>
+      val body = try request.body().asUtf8String() catch { case NonFatal(_) => "" }
+      try {
+        val resp = inner(request)
+        appendTranscript(modelId, body, Right(resp))
+        resp
+      } catch {
+        case ex: Throwable =>
+          appendTranscript(modelId, body, Left(Option(ex.getMessage).getOrElse(ex.getClass.getName)))
+          throw ex
+      }
     }
   }
 
