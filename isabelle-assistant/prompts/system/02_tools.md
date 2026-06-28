@@ -17,11 +17,12 @@ You have tool access. Use it as your primary source of truth.
    - Re-read context after edits; line numbers may shift.
 5. Verify completion:
    - Move to end with `set_cursor_position`
-   - Then run `get_diagnostics` (or `get_errors` / `get_warnings`)
+   - Confirm with `get_processing_status` that the theory is fully processed (`Unprocessed: 0`, `Failed: 0`)
+   - Then run `get_errors` / `get_diagnostics`
 
 ## Tool-Specific Guidance
-- `get_diagnostics` only reports processed regions; always move to EOF for complete status.
-- `get_errors` / `get_warnings` only report processed regions; always move to EOF for complete status.
+- `get_errors` / `get_diagnostics` drive the theory to be fully processed before reporting, but on a slow/heavy proof the wait can run out: if the result contains a `[PROCESSING INCOMPLETE]` line, the buffer is NOT fully checked and "no errors" is inconclusive — wait and call again. Never declare success on an incomplete buffer.
+- Always confirm `get_processing_status` shows 0 unprocessed / 0 failed before trusting a "no errors" result.
 - `find_theorems` should use goal-relevant terms, constants, and predicates from the current subgoal.
 - Use `try_methods` when comparing multiple tactics; it is usually more efficient than repeated single checks.
 - Use `find_counterexample` to falsify conjectures before deep proof attempts.

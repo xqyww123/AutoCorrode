@@ -805,9 +805,14 @@ object IQMcpClient {
       scope: DiagnosticScope,
       timeoutMs: Long,
       selectionArgs: Map[String, Any] = Map.empty,
-      path: Option[String] = None
+      path: Option[String] = None,
+      serverWaitMs: Option[Long] = None
   ): Either[String, DiagnosticsResult] = {
-    val baseArgs = Map("severity" -> severity.wire, "scope" -> scope.wire)
+    // When serverWaitMs is set the server drives PIDE to fully process the node
+    // (up to that budget) before reading diagnostics, so a "no errors" result is
+    // not vacuous. Keep it strictly below timeoutMs so the socket never fires first.
+    val baseArgs = Map[String, Any]("severity" -> severity.wire, "scope" -> scope.wire) ++
+      serverWaitMs.map(ms => "timeout" -> ms.toInt).toMap
     val args = scope match {
       case DiagnosticScope.Selection => baseArgs ++ selectionArgs
       case DiagnosticScope.File => baseArgs ++ path.map("path" -> _)

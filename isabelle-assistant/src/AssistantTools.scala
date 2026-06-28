@@ -1268,8 +1268,12 @@ object AssistantTools {
               .callGetDiagnostics(
                 severity = IQMcpClient.DiagnosticSeverity.Error,
                 scope = IQMcpClient.DiagnosticScope.File,
-                timeoutMs = timeoutMs,
-                path = Some(path)
+                // Drive + wait for full PIDE processing before reading errors, so a
+                // "no errors" result is never vacuous on still-unprocessed proof
+                // commands. Long socket budget; server wait kept strictly below it.
+                timeoutMs = AssistantConstants.PROCESSING_WAIT_TIMEOUT_MS,
+                path = Some(path),
+                serverWaitMs = Some(AssistantConstants.PROCESSING_WAIT_TIMEOUT_MS - 10000L)
               )
               .fold(
                 mcpErr => s"Error: $mcpErr",
@@ -1289,8 +1293,9 @@ object AssistantTools {
               .callGetDiagnostics(
                 severity = IQMcpClient.DiagnosticSeverity.Error,
                 scope = IQMcpClient.DiagnosticScope.File,
-                timeoutMs = timeoutMs,
-                path = Some(path)
+                timeoutMs = AssistantConstants.PROCESSING_WAIT_TIMEOUT_MS,
+                path = Some(path),
+                serverWaitMs = Some(AssistantConstants.PROCESSING_WAIT_TIMEOUT_MS - 10000L)
               )
               .fold(
                 mcpErr => s"Error: $mcpErr",

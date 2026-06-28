@@ -450,6 +450,7 @@ class IQServer(
     @volatile var currentStatus = getNodeStatus()
     var completed = isCompleted(currentStatus)
 
+    try {
     if (!completed) {
       val latch = new CountDownLatch(1)
       var checkCount = 0
@@ -515,10 +516,16 @@ class IQServer(
     } else {
       Output.writeln(s"I/Q Server: Theory completion timed out after ${elapsedMs}ms")
     }
-
-    // Restore the original required state
-    GUI_Thread.now {
-      Document_Model.node_required(node_name, set = originalRequiredState)
+    } finally {
+      // Always restore the required state — even on exception / InterruptedException
+      // — so a node is never left permanently `required` (which would keep PIDE
+      // perpetually scheduling it). Only unset if WE were the one to set it (it was
+      // not required beforehand), so we never clobber a pin another caller needs.
+      if (!originalRequiredState) {
+        GUI_Thread.now {
+          Document_Model.node_required(node_name, set = false)
+        }
+      }
     }
 
     (completed, currentStatus)
@@ -4738,16 +4745,51 @@ end"""
           return Left("scope='file' requires parameter: path")
       }
 
-      GUI_Thread.now {
-        getFileContentAndModel(filePath) match {
-          case (Some(content), Some(model)) =>
+      // Resolve the model with a single-shot EDT read, then — OFF the EDT — optionally
+      // drive PIDE to fully process the node before reading diagnostics, so a "no
+      // errors" result is never vacuous on still-unprocessed proof commands. We must
+      // NOT block on waitForTheoryCompletion inside GUI_Thread.now: its latch is only
+      // released by Commands_Changed events delivered via the EDT, so blocking the EDT
+      // here would deadlock/freeze jEdit. The wait runs only when the caller supplies a
+      // positive `timeout` (the agent's get_errors does; interactive callers do not, so
+      // their behaviour is unchanged). The wait honours the caller's budget, so it can
+      // never outlast the client socket deadline.
+      val resolved = GUI_Thread.now { getFileContentAndModel(filePath) }
+      resolved match {
+        case (Some(content), Some(model)) =>
+          val waitMs: Option[Int] =
+            IQArgumentUtils.optionalIntParam(params, "timeout") match {
+              case Right(v) => v
+              case Left(_)  => None
+            }
+          val procStatus: Option[Document_Status.Node_Status] = waitMs match {
+            case Some(t) if t > 0 =>
+              // Per-command cap so a single non-terminating command can't hold the
+              // whole budget; it returns "incomplete" instead.
+              val (_, st) = waitForTheoryCompletion(model, Some(t), Some(30000))
+              Some(st)
+            case _ => None
+          }
+          GUI_Thread.now {
             val snapshot = Document_Model.snapshot(model)
-            val diagnostics = collectDiagnosticsInRange(
+            val diagnostics0 = collectDiagnosticsInRange(
               snapshot,
               Text.Range(0, content.length),
               parsedSeverity,
               Some(Line.Document(content))
             )
+            val incompleteStatus = procStatus.filter(st =>
+              st.unprocessed > 0 || st.running > 0 || !st.terminated)
+            val diagnostics = incompleteStatus match {
+              case Some(st) =>
+                diagnostics0 :+ Map[String, Any](
+                  "line" -> 0,
+                  "start_offset" -> 0,
+                  "end_offset" -> 0,
+                  "message" -> s"[PROCESSING INCOMPLETE] ${st.unprocessed} command(s) unprocessed, ${st.running} still running after the wait budget. The absence of errors above is NOT conclusive — the proof has not been fully checked and may not verify. Wait and call get_errors again, or check get_processing_status, before declaring the proof complete."
+                )
+              case None => diagnostics0
+            }
             Right(
               Map(
                 "scope" -> "file",
@@ -4755,14 +4797,15 @@ end"""
                 "path" -> filePath,
                 "node_name" -> model.node_name.toString,
                 "count" -> diagnostics.length,
-                "diagnostics" -> diagnostics
+                "diagnostics" -> diagnostics,
+                "processing_incomplete" -> incompleteStatus.isDefined
               )
             )
-          case _ =>
-            Left(
-              s"File $filePath is not tracked by Isabelle/jEdit. Open it first before requesting diagnostics."
-            )
-        }
+          }
+        case _ =>
+          Left(
+            s"File $filePath is not tracked by Isabelle/jEdit. Open it first before requesting diagnostics."
+          )
       }
     } else {
       val normalizedParams = withDefaultCurrentSelection(params)

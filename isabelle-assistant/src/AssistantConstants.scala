@@ -126,6 +126,11 @@ object AssistantConstants {
     * even produce useful context. After this, the chat proceeds with
     * no resolved target; the model still answers. */
   val CHAT_CONTEXT_FETCH_TIMEOUT = 1000L
+  /** Socket budget for the agent's get_errors when it drives + waits for the
+    * theory to be fully processed before reading diagnostics. Must comfortably
+    * exceed the server-side wait so the client never times out first. Heavy VC
+    * proofs (e.g. NTP4VC smt goals) can take tens of seconds to check. */
+  val PROCESSING_WAIT_TIMEOUT_MS = 120000L
   val SUGGESTION_COLLECTION_TIMEOUT = 90000L
   val RETRY_BASE_DELAY_MS = 1000L
   val MAX_RETRY_ATTEMPTS = 30
