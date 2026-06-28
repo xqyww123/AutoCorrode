@@ -71,6 +71,17 @@ object OpenAIAdapter {
   def extractOpenAIModel(modelId: String): String =
     if (modelId.startsWith("openai/")) modelId.stripPrefix("openai/") else modelId
 
+  // Whether to use the Responses API server-side store + previous_response_id
+  // chaining. Real OpenAI requires store=true for that chaining; some
+  // OpenAI-compatible gateways reject store=true ("Store must be set to false")
+  // and keep no server-side state. Set OPENAI_RESPONSES_STORE=false for those:
+  // we then send store=false AND never chain (always full context per call),
+  // since previous_response_id is meaningless without server-side storage.
+  private val storeEnabled: Boolean =
+    Option(System.getenv("OPENAI_RESPONSES_STORE"))
+      .map(_.trim.toLowerCase)
+      .forall(v => v != "false" && v != "0" && v != "no" && v != "off")
+
   // The closure is stateful: it tracks the last response ID for
   // previous_response_id chaining. BedrockClient's agentic loop calls the
   // invoker sequentially (single-threaded), so no synchronization is needed.
@@ -91,7 +102,9 @@ object OpenAIAdapter {
         Output.writeln(s"[Assistant] Responses API call ($mode), payload size=${payload.length}")
         val response = callResponses(payload, apiKey, baseUrl)
         recordUsage(response)
-        lastResponseId = extractResponseId(response)
+        // With store disabled the server keeps no response to chain from, so
+        // never retain an id — this forces full-context mode on every call.
+        lastResponseId = if (storeEnabled) extractResponseId(response) else None
         Output.writeln(s"[Assistant] Responses API call succeeded (response_id=${lastResponseId.getOrElse("none")})")
         responsesToAnthropic(response)
       } catch {
@@ -183,7 +196,7 @@ object OpenAIAdapter {
     }
 
     sb.append(""","reasoning":{"effort":"high"}""")
-    sb.append(""","store":true""")
+    sb.append(if (storeEnabled) ""","store":true""" else ""","store":false""")
     sb.append(",\"truncation\":\"auto\"")
 
     previousResponseId.foreach { id =>
